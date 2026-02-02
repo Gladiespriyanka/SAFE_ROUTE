@@ -1,5 +1,4 @@
-lighting_level,crowd_level,distance_to_main_road_m,shops_open_at_night,police_station_within_1km,cctv_present,hour_of_day,is_weekend,area_type,near_metro_or_bus,past_incidents_level,group_travel,safety_label
-
+lighting_level,crowd_level,distance_to_main_road_m,shops_open_at_night,police_station_within_1km,cctv_present,hour_of_day,is_weekend,area_type,near_metro_or_bus,past_incidents_level,group_travel,area_crime_risk,audit_score_mean,dist_to_metro_m,dist_to_bus_m,dist_to_hospital_m,dist_to_police_m,safety_label
 
 2,2,50,1,1,1,20,0,2
 2,2,80,1,1,1,21,0,2

@@ -27,6 +27,13 @@ def sanitize_inputs(
     near_metro_or_bus: int,
     past_incidents_level: int,
     group_travel: int,
+    # New realistic-data features (optional)
+    area_crime_risk: float | None = None,
+    audit_score_mean: float | None = None,
+    dist_to_metro_m: float | None = None,
+    dist_to_bus_m: float | None = None,
+    dist_to_hospital_m: float | None = None,
+    dist_to_police_m: float | None = None,
 ):
     """
     Basic validation + clipping so the model never crashes on weird values.
@@ -54,11 +61,35 @@ def sanitize_inputs(
 
     is_weekend = 1 if is_weekend else 0
 
-    # New contextual features
+    # Contextual features
     area_type = int(min(max(area_type, 0), 2))
     near_metro_or_bus = 1 if near_metro_or_bus else 0
     past_incidents_level = int(min(max(past_incidents_level, 0), 2))
     group_travel = 1 if group_travel else 0
+
+    # New realistic-data features
+    def clip_or_zero(value, lo, hi):
+        if value is None:
+            return 0.0
+        try:
+            v = float(value)
+        except Exception:
+            return 0.0
+        if v < lo:
+            return lo
+        if v > hi:
+            return hi
+        return v
+
+    # area_crime_risk: treat 0-2 as low/med/high, but allow float (e.g., normalized)
+    area_crime_risk = clip_or_zero(area_crime_risk, 0.0, 3.0)
+    # perceived safety from audits, 0-2
+    audit_score_mean = clip_or_zero(audit_score_mean, 0.0, 2.0)
+    # distances in meters, 0-10km
+    dist_to_metro_m = clip_or_zero(dist_to_metro_m, 0.0, 10000.0)
+    dist_to_bus_m = clip_or_zero(dist_to_bus_m, 0.0, 10000.0)
+    dist_to_hospital_m = clip_or_zero(dist_to_hospital_m, 0.0, 10000.0)
+    dist_to_police_m = clip_or_zero(dist_to_police_m, 0.0, 10000.0)
 
     return (
         lighting_level,
@@ -73,6 +104,12 @@ def sanitize_inputs(
         near_metro_or_bus,
         past_incidents_level,
         group_travel,
+        area_crime_risk,
+        audit_score_mean,
+        dist_to_metro_m,
+        dist_to_bus_m,
+        dist_to_hospital_m,
+        dist_to_police_m,
     )
 
 
@@ -90,6 +127,13 @@ def generate_reasons_grouped(
     past_incidents_level: int,
     group_travel: int,
     predicted_label: int,
+    # New features (optional) – used for richer explanations later
+    area_crime_risk: float | None = None,
+    audit_score_mean: float | None = None,
+    dist_to_metro_m: float | None = None,
+    dist_to_bus_m: float | None = None,
+    dist_to_hospital_m: float | None = None,
+    dist_to_police_m: float | None = None,
 ):
     """
     Returns a dict of reason groups so the UI can show them in sections.
@@ -129,7 +173,7 @@ def generate_reasons_grouped(
     else:
         groups["Environment"].append("Office/IT park area; may be busy at office hours but quiet late at night.")
 
-    # Infrastructure: shops, police, CCTV, transport
+    # Infrastructure: shops, police, CCTV, transport, POIs
     if shops_open_at_night:
         groups["Infrastructure"].append("Shops are open at night, more activity nearby.")
     else:
@@ -150,7 +194,20 @@ def generate_reasons_grouped(
     else:
         groups["Infrastructure"].append("Not near a major public transport hub.")
 
-    # Context & history: incidents + group travel
+    # Optional POI-based hints
+    if dist_to_metro_m is not None and dist_to_metro_m > 0:
+        if dist_to_metro_m <= 500:
+            groups["Infrastructure"].append("Very close to a metro station.")
+        elif dist_to_metro_m <= 1500:
+            groups["Infrastructure"].append("Within walking distance of a metro station.")
+    if dist_to_police_m is not None and dist_to_police_m > 0:
+        if dist_to_police_m <= 1000:
+            groups["Infrastructure"].append("Police station is relatively close by.")
+    if dist_to_hospital_m is not None and dist_to_hospital_m > 0:
+        if dist_to_hospital_m <= 2000:
+            groups["Infrastructure"].append("Hospital is within a short drive.")
+
+    # Context & history: incidents + group travel + area crime + audits
     if past_incidents_level == 2:
         groups["Context & history"].append(
             "Area has a higher reported incident level; treat scores with extra caution."
@@ -164,6 +221,22 @@ def generate_reasons_grouped(
         groups["Context & history"].append("Walking with others generally reduces individual risk compared to walking alone.")
     else:
         groups["Context & history"].append("Walking alone; personal caution is more important.")
+
+    if area_crime_risk is not None:
+        if area_crime_risk >= 2:
+            groups["Context & history"].append("Background crime risk for this area is high.")
+        elif area_crime_risk >= 1:
+            groups["Context & history"].append("Background crime risk for this area is medium.")
+        else:
+            groups["Context & history"].append("Background crime risk for this area is relatively low.")
+
+    if audit_score_mean is not None and audit_score_mean > 0:
+        if audit_score_mean >= 1.5:
+            groups["Context & history"].append("Recent user audits describe this place as feeling relatively safe.")
+        elif audit_score_mean <= 0.5:
+            groups["Context & history"].append("Recent user audits describe this place as feeling unsafe or uncomfortable.")
+        else:
+            groups["Context & history"].append("User audits give this place a mixed or moderate safety feeling.")
 
     # Time & context
     if hour_of_day >= 22 or hour_of_day <= 5:
@@ -212,10 +285,17 @@ def predict_safety(
     cctv_present: int,
     hour_of_day: int,
     is_weekend: int,
-    area_type: int,
-    near_metro_or_bus: int,
-    past_incidents_level: int,
-    group_travel: int,
+    area_type: int = 0,
+    near_metro_or_bus: int = 0,
+    past_incidents_level: int = 0,
+    group_travel: int = 0,
+    # New optional features
+    area_crime_risk: float | None = None,
+    audit_score_mean: float | None = None,
+    dist_to_metro_m: float | None = None,
+    dist_to_bus_m: float | None = None,
+    dist_to_hospital_m: float | None = None,
+    dist_to_police_m: float | None = None,
 ):
     """
     Main helper: sanitize inputs, run model, return label, probs, confidence, reasons.
@@ -233,6 +313,12 @@ def predict_safety(
         near_metro_or_bus,
         past_incidents_level,
         group_travel,
+        area_crime_risk,
+        audit_score_mean,
+        dist_to_metro_m,
+        dist_to_bus_m,
+        dist_to_hospital_m,
+        dist_to_police_m,
     ) = sanitize_inputs(
         lighting_level,
         crowd_level,
@@ -246,6 +332,12 @@ def predict_safety(
         near_metro_or_bus,
         past_incidents_level,
         group_travel,
+        area_crime_risk,
+        audit_score_mean,
+        dist_to_metro_m,
+        dist_to_bus_m,
+        dist_to_hospital_m,
+        dist_to_police_m,
     )
 
     values = [
@@ -261,9 +353,20 @@ def predict_safety(
         near_metro_or_bus,
         past_incidents_level,
         group_travel,
+        area_crime_risk,
+        audit_score_mean,
+        dist_to_metro_m,
+        dist_to_bus_m,
+        dist_to_hospital_m,
+        dist_to_police_m,
     ]
 
-    x = np.array([values])
+    # Align with feature_cols (future-proof if order changes)
+    x_dict = {col: 0.0 for col in feature_cols}
+    for col_name, val in zip(feature_cols, values[: len(feature_cols)]):
+        x_dict[col_name] = val
+
+    x = np.array([[x_dict[col] for col in feature_cols]])
     pred = model.predict(x)[0]
     proba = model.predict_proba(x)[0]
 
@@ -281,6 +384,12 @@ def predict_safety(
         past_incidents_level,
         group_travel,
         predicted_label=int(pred),
+        area_crime_risk=area_crime_risk,
+        audit_score_mean=audit_score_mean,
+        dist_to_metro_m=dist_to_metro_m,
+        dist_to_bus_m=dist_to_bus_m,
+        dist_to_hospital_m=dist_to_hospital_m,
+        dist_to_police_m=dist_to_police_m,
     )
 
     confidence = confidence_from_probas(proba)

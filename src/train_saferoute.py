@@ -21,7 +21,9 @@ import joblib
 # ----------------------------
 
 DATA_PATH = "data/saferoute_delhi.csv"
-FEATURE_COLS = [
+
+# Base features (your current ones)
+BASE_FEATURE_COLS = [
     "lighting_level",
     "crowd_level",
     "distance_to_main_road_m",
@@ -36,6 +38,17 @@ FEATURE_COLS = [
     "group_travel",
 ]
 
+# New realistic-data features (to be populated as you build data)
+EXTRA_FEATURE_COLS = [
+    "area_crime_risk",      # 0=low,1=medium,2=high based on ward/police-station crime stats
+    "audit_score_mean",     # mean perceived safety from nearby audits
+    "dist_to_metro_m",      # distance to nearest metro station (meters)
+    "dist_to_bus_m",        # distance to nearest major bus stop (meters)
+    "dist_to_hospital_m",   # distance to nearest hospital (meters)
+    "dist_to_police_m",     # distance to nearest police station (meters)
+]
+
+FEATURE_COLS = BASE_FEATURE_COLS + EXTRA_FEATURE_COLS
 
 TARGET_COL = "safety_label"  # 0=Unsafe, 1=Moderate, 2=Safe
 
@@ -60,6 +73,12 @@ RANDOM_STATE = 42
 
 print(f"Loading data from {DATA_PATH} ...")
 df = pd.read_csv(DATA_PATH)
+
+# Ensure all expected feature columns exist; if not, create with zeros
+for col in FEATURE_COLS:
+    if col not in df.columns:
+        print(f"[WARN] Column {col} not found in data; creating with 0.0 for now.")
+        df[col] = 0.0
 
 X = df[FEATURE_COLS]
 y = df[TARGET_COL]
