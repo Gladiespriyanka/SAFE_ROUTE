@@ -1,0 +1,2 @@
+timestamp,lighting_level,crowd_level,distance_to_main_road_m,shops_open_at_night,police_station_within_1km,cctv_present,hour_of_day,is_weekend,predicted_label,predicted_label_text,confidence_level,confidence_score,prob_unsafe,prob_moderate,prob_safe
+2026-02-02T07:33:10.733400,1,2,200.0,1,0,0,20,0,1,Moderate,Low,0.5733333333333334,0.0,0.5733333333333334,0.4266666666666667

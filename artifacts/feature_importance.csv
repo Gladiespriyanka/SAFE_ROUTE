@@ -1,0 +1,9 @@
+feature,importance
+distance_to_main_road_m,0.38669064724164515
+lighting_level,0.2165778935172359
+police_station_within_1km,0.15943264794317388
+hour_of_day,0.09161693770820503
+shops_open_at_night,0.051431208646154476
+crowd_level,0.04864132446442669
+cctv_present,0.04065096755424765
+is_weekend,0.004958372924911256
