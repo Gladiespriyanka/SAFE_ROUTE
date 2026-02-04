@@ -1,3 +1,8 @@
+timestamp,lat,lon,lighting_level,crowd_level,distance_to_main_road_m,shops_open_at_night,police_station_within_1km,cctv_present,hour_of_day,is_weekend,area_type,near_metro_or_bus_stop,past_incidents_level,walking_alone,area_crime_risk_level,predicted_label_text,area_crime_risk,p_unsafe,p_moderate,p_safe,audit_score_mean
+
+
+
 2026-02-02T17:10:50.854593,28.6139,77.209,0,0,200.0,0,0,0,20,0,0,0,0,0,1,Moderate,Low,0.5333333333333333,0.24,0.5333333333333333,0.22666666666666666
 2026-02-02T17:13:37.766116,28.6139,77.209,0,0,200.0,0,0,0,20,0,0,0,0,0,1,Moderate,Low,0.5333333333333333,0.24,0.5333333333333333,0.22666666666666666
 2026-02-02T17:13:51.092203,28.6139,77.209,0,0,200.0,0,0,0,20,0,0,0,0,0,1,Moderate,Low,0.5333333333333333,0.24,0.5333333333333333,0.22666666666666666
+2026-02-03T05:52:22.840277,28.6139,77.209,0,0,200.0,0,0,0,20,0,0,0,0,0,1,Moderate,Low,0.5333333333333333,0.24,0.5333333333333333,0.22666666666666666

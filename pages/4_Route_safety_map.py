@@ -26,20 +26,15 @@ def call_api_for_point(
     lon: float,
     base_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Call your existing /predict API for one point.
-
-    NOTE: Right now your model does NOT use latitude/longitude as features.
-    We include them in the payload only if your backend RouteFeatures supports them.
-    If backend crashes, just remove these 2 lines from payload below.
-    """
+    """Call your existing /predict API for one point."""
     payload = base_payload.copy()
-    # If backend RouteFeatures has latitude/longitude fields, keep these:
-    # payload["latitude"] = lat
-    # payload["longitude"] = lon
+    payload["latitude"] = float(lat)
+    payload["longitude"] = float(lon)
 
     resp = requests.post(API_URL, json=payload, timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 
 def score_to_color(label: str) -> str:
