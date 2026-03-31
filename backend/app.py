@@ -3,7 +3,7 @@ import sys
 import traceback
 from typing import Literal, List, Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ if SRC_DIR not in sys.path:
     sys.path.append(SRC_DIR)
 
 from predict_utils import load_model_and_features, predict_safety  # noqa: E402
+
 
 app = FastAPI(
     title="SafeRoute Delhi API",
@@ -32,6 +33,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# -------- Simple API key auth --------
+API_KEY = "SAFEROUTE_SECRET_123"  # simple demo key
+API_KEY_HEADER_NAME = "X-API-Key"
+
+
+def verify_api_key(x_api_key: str = Header(..., alias=API_KEY_HEADER_NAME)):
+    """
+    Simple API key check using header 'X-API-Key'.
+    """
+    if x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
+    return True
+
 
 # -------- Load ML model --------
 model, feature_cols = load_model_and_features()
@@ -50,6 +68,7 @@ try:
 except Exception as e:
     print(f"[WARN] Could not load area risk table: {e}")
 
+
 # --- Simple lat/lon -> area_key mapping for Delhi ---
 def _get_area_key_from_coords(lat: float, lon: float) -> str:
     """
@@ -59,7 +78,6 @@ def _get_area_key_from_coords(lat: float, lon: float) -> str:
     It should match keys present in backend/data/area_risk_delhi.csv:
         central_delhi, north_delhi, south_delhi, east_delhi, west_delhi
     """
-
     # Rough central reference (Rajiv Chowk / New Delhi area)
     center_lat = 28.61
     center_lon = 77.21
@@ -87,13 +105,14 @@ def _get_area_key_from_coords(lat: float, lon: float) -> str:
         else:
             return "west_delhi"
 
+
 # -------- In-memory stores --------
 FEEDBACK_STORE: List[Dict[str, Any]] = []
 AUDITS_STORE: List[Dict[str, Any]] = []
 _next_audit_id = 1
 
-# -------- Pydantic models --------
 
+# -------- Pydantic models --------
 class RouteFeatures(BaseModel):
     """
     Core tabular features + basic geo coords.
@@ -117,6 +136,7 @@ class RouteFeatures(BaseModel):
     past_incidents_level: int = Field(..., ge=0, le=2)
     group_travel: Literal[0, 1]
 
+
 class FeedbackPayload(BaseModel):
     """
     Simple thumbs-up / thumbs-down feedback from UI.
@@ -135,6 +155,7 @@ class FeedbackPayload(BaseModel):
     user_agrees: Literal[0, 1]
     comment: Optional[str] = Field(default=None, max_length=280)
 
+
 class SafetyAudit(BaseModel):
     """
     Basic Safetipin-style audit for a point on the map.
@@ -152,8 +173,8 @@ class SafetyAudit(BaseModel):
     is_weekend: Literal[0, 1]
     area_type: Optional[int] = Field(default=None, ge=0, le=2)
 
-# -------- Small helpers --------
 
+# -------- Small helpers --------
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     from math import radians, sin, cos, sqrt, atan2
     R = 6371000.0  # meters
@@ -162,6 +183,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return R * c
+
 
 def compute_audit_score_mean(lat: float, lon: float, radius_m: float = 300.0) -> float:
     """
@@ -182,11 +204,12 @@ def compute_audit_score_mean(lat: float, lon: float, radius_m: float = 300.0) ->
         return 0.0
     return float(sum(scores) / len(scores))
 
-# -------- Routes --------
 
+# -------- Routes --------
 @app.get("/")
 def root():
     return {"message": "SafeRoute Delhi API is running"}
+
 
 @app.get("/health")
 def health_check():
@@ -204,8 +227,12 @@ def health_check():
         "area_risk_loaded": AREA_RISK_TABLE is not None,
     }
 
+
 @app.post("/predict")
-def predict_route_safety(payload: RouteFeatures):
+def predict_route_safety(
+    payload: RouteFeatures,
+    ok: bool = Depends(verify_api_key),
+):
     """
     Run the SafeRoute Delhi model and return label, probabilities, confidence, and reasons.
 
@@ -214,7 +241,7 @@ def predict_route_safety(payload: RouteFeatures):
       - Compute realistic-data features:
           * audit_score_mean from nearby audits
           * POI distances from precomputed cache
-          * area_crime_risk (placeholder: 0 until you wire area_key mapping)
+          * area_crime_risk from area_risk_delhi.csv via area_key mapping
       - Call predict_safety with all features.
     """
     try:
@@ -238,14 +265,13 @@ def predict_route_safety(payload: RouteFeatures):
             dist_to_hospital_m = poi_dists.get("dist_to_hospital_m")
             dist_to_police_m = poi_dists.get("dist_to_police_m")
 
-        # --- New: map coords -> area_key -> area_crime_risk from AREA_RISK_TABLE ---
+        # 3) Map coords -> area_key -> area_crime_risk from AREA_RISK_TABLE
         area_crime_risk = 0.0
         if AREA_RISK_TABLE is not None:
             try:
                 area_key = _get_area_key_from_coords(lat, lon)
                 area_crime_risk = float(AREA_RISK_TABLE.get_risk(area_key))
             except Exception:
-                # If anything goes wrong, fall back to 0.0 so predictions still work
                 area_crime_risk = 0.0
 
         result = predict_safety(
@@ -275,8 +301,12 @@ def predict_route_safety(payload: RouteFeatures):
         traceback.print_exc()
         return {"error": str(e)}
 
+
 @app.post("/feedback")
-def submit_feedback(payload: FeedbackPayload):
+def submit_feedback(
+    payload: FeedbackPayload,
+    ok: bool = Depends(verify_api_key),
+):
     """
     Store simple feedback about predictions (in-memory demo).
     """
@@ -284,6 +314,7 @@ def submit_feedback(payload: FeedbackPayload):
     fb["received_at"] = __import__("datetime").datetime.utcnow().isoformat()
     FEEDBACK_STORE.append(fb)
     return {"status": "received", "stored_items": len(FEEDBACK_STORE)}
+
 
 @app.get("/feedback/summary")
 def feedback_summary():
@@ -310,8 +341,12 @@ def feedback_summary():
         "agree_ratio": agree_ratio,
     }
 
+
 @app.post("/audit")
-def create_audit(audit: SafetyAudit):
+def create_audit(
+    audit: SafetyAudit,
+    ok: bool = Depends(verify_api_key),
+):
     """
     Store a new safety audit from a user.
     For now this is in-memory; later you can persist to CSV/SQLite/Postgres.
@@ -324,6 +359,7 @@ def create_audit(audit: SafetyAudit):
     AUDITS_STORE.append(record)
     return record
 
+
 @app.get("/audit")
 def list_audits(limit: int = 100):
     """
@@ -331,12 +367,14 @@ def list_audits(limit: int = 100):
     """
     return list(reversed(AUDITS_STORE))[:limit]
 
+
 @app.get("/audit/nearby")
 def audits_nearby(
     lat: float,
     lon: float,
     radius_m: float = 300.0,
     limit: int = 50,
+    ok: bool = Depends(verify_api_key),
 ):
     """
     Return audits near a given point using a simple Haversine distance filter.
@@ -355,8 +393,13 @@ def audits_nearby(
     results.sort(key=lambda x: x["distance_m"])
     return results[:limit]
 
+
 @app.get("/poi_context")
-def get_poi_context(lat: float, lon: float):
+def get_poi_context(
+    lat: float,
+    lon: float,
+    ok: bool = Depends(verify_api_key),
+):
     """
     Given a point, return distances to nearest metro, bus, hospital, police
     using the precomputed Delhi POI cache.
@@ -365,8 +408,12 @@ def get_poi_context(lat: float, lon: float):
         raise HTTPException(status_code=503, detail="POI context not loaded")
     return POI_CONTEXT.nearest_distances(lat=lat, lon=lon)
 
+
 @app.get("/area_risk")
-def get_area_risk(area_key: str):
+def get_area_risk(
+    area_key: str,
+    ok: bool = Depends(verify_api_key),
+):
     """
     Return crime risk bucket (0/1/2) for a given area_key,
     using the precomputed area_risk_delhi.csv table.

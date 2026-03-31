@@ -406,3 +406,11 @@ def predict_safety(
         "reasons_grouped": reasons_grouped,
     }
     return result
+
+
+
+#How do you handle imbalanced data?”
+
+#“Why did you choose tree‑based models?”
+
+#“What would you improve if you had more time or data?”

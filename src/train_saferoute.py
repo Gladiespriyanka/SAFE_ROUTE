@@ -82,7 +82,7 @@ for col in FEATURE_COLS:
 
 X = df[FEATURE_COLS]
 y = df[TARGET_COL]
-
+5
 # ----------------------------
 # Train/test split (for final eval)
 # ----------------------------
@@ -103,18 +103,18 @@ print(f"Train size: {len(X_train)}, Test size: {len(X_test)}")
 
 results = []
 
-for name, model in MODELS.items():
+for name, model in MODELS.items(): # Loop through each model defined in the MODELS dictionary
     print("\n==============================")
     print(f"Training model: {name}")
     print("==============================")
 
-    # Cross-validation accuracy
+    # Cross-validation accuracy + macro F1
     cv_scores = cross_val_score(
         model, X_train, y_train, cv=N_FOLDS, scoring="accuracy"
-    )
+    ) #this is for accuracy score
     cv_f1_scores = cross_val_score(
         model, X_train, y_train, cv=N_FOLDS, scoring="f1_macro"
-    )
+    ) #this is for macro f1 score
 
     print(f"{name} CV accuracy scores: {cv_scores}")
     print(f"{name} CV accuracy mean: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
@@ -122,12 +122,12 @@ for name, model in MODELS.items():
     print(f"{name} CV macro F1 mean: {cv_f1_scores.mean():.4f} ± {cv_f1_scores.std():.4f}")
 
     # Fit on full train split
-    model.fit(X_train, y_train)
+    model.fit(X_train, y_train)  
 
     # Evaluate on held-out test set
     y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    macro_f1 = f1_score(y_test, y_pred, average="macro")
+    acc = accuracy_score(y_test, y_pred) #this is for accuracy score
+    macro_f1 = f1_score(y_test, y_pred, average="macro") #this is for macro f1 score
 
     print(f"{name} Test accuracy: {acc:.4f}")
     print(f"{name} Test macro F1: {macro_f1:.4f}")
@@ -149,9 +149,9 @@ for name, model in MODELS.items():
         }
     )
 
-# ----------------------------
+# -------------------------------
 # Pick best model by CV macro F1
-# ----------------------------
+# -------------------------------
 
 results_df = pd.DataFrame(
     [

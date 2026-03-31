@@ -9,6 +9,9 @@ API_URL = "http://127.0.0.1:8000/predict"
 AUDIT_URL = "http://127.0.0.1:8000/audit"
 API_BASE = "http://127.0.0.1:8000"
 
+API_KEY = "SAFEROUTE_SECRET_123"  # must match backend
+API_HEADERS = {"X-API-Key": API_KEY}
+
 st.set_page_config(page_title="SafeRoute Delhi", page_icon="🛣️", layout="centered")
 
 LABEL_COLORS = {
@@ -19,6 +22,7 @@ LABEL_COLORS = {
 
 LOG_DIR = "logs"
 LOG_FILE = os.path.join(LOG_DIR, "predictions.csv")
+
 
 def ensure_log_file_exists():
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -52,6 +56,7 @@ def ensure_log_file_exists():
                 ]
             )
 
+
 def log_prediction(payload: dict, result: dict):
     ensure_log_file_exists()
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
@@ -84,6 +89,7 @@ def log_prediction(payload: dict, result: dict):
                 probs["safe"],
             ]
         )
+
 
 st.title("SafeRoute Delhi – Women-centric Route Safety Scorer")
 st.write(
@@ -216,7 +222,7 @@ if st.button("Check safety"):
     }
 
     try:
-        resp = requests.post(API_URL, json=payload, timeout=5)
+        resp = requests.post(API_URL, json=payload, headers=API_HEADERS, timeout=5)
         if resp.status_code != 200:
             st.error(f"API error: {resp.status_code} – {resp.text}")
         else:
@@ -277,6 +283,7 @@ if st.button("Check safety"):
                         fb_resp = requests.post(
                             "http://127.0.0.1:8000/feedback",
                             json=fb_payload,
+                            headers=API_HEADERS,
                             timeout=5,
                         )
                         if fb_resp.status_code == 200:
@@ -302,6 +309,7 @@ if st.button("Check safety"):
                             fb_resp = requests.post(
                                 "http://127.0.0.1:8000/feedback",
                                 json=fb_payload,
+                                headers=API_HEADERS,
                                 timeout=5,
                             )
                             if fb_resp.status_code == 200:
@@ -309,7 +317,7 @@ if st.button("Check safety"):
                             else:
                                 st.error("Failed to send feedback.")
 
-                # --- NEW: Nearby audits & POI context ---
+                # --- Nearby audits & POI context ---
                 st.markdown("### Nearby audits & POI context")
 
                 lat = latitude  # main location
@@ -325,14 +333,15 @@ if st.button("Check safety"):
                         resp_poi = requests.get(
                             f"{API_BASE}/poi_context",
                             params={"lat": lat, "lon": lon},
+                            headers=API_HEADERS,
                             timeout=5,
                         )
                         if resp_poi.status_code == 200:
                             poi_data = resp_poi.json()
-                            st.write(f"- **Metro**: {poi_data.get('dist_to_metro_m', 'N/A'):.0f} m")
-                            st.write(f"- **Bus stop**: {poi_data.get('dist_to_bus_m', 'N/A'):.0f} m")
-                            st.write(f"- **Hospital**: {poi_data.get('dist_to_hospital_m', 'N/A'):.0f} m")
-                            st.write(f"- **Police station**: {poi_data.get('dist_to_police_m', 'N/A'):.0f} m")
+                            st.write(f"- **Metro**: {poi_data.get('dist_to_metro_m', 0):.0f} m")
+                            st.write(f"- **Bus stop**: {poi_data.get('dist_to_bus_m', 0):.0f} m")
+                            st.write(f"- **Hospital**: {poi_data.get('dist_to_hospital_m', 0):.0f} m")
+                            st.write(f"- **Police station**: {poi_data.get('dist_to_police_m', 0):.0f} m")
                         else:
                             st.info("POI context not available right now.")
                     except Exception as e:
@@ -346,6 +355,7 @@ if st.button("Check safety"):
                         resp_audits = requests.get(
                             f"{API_BASE}/audit/nearby",
                             params={"lat": lat, "lon": lon, "radius_m": 300.0, "limit": 10},
+                            headers=API_HEADERS,
                             timeout=5,
                         )
                         if resp_audits.status_code == 200:
@@ -431,7 +441,7 @@ if st.button("Submit audit for this place"):
         "area_type": None if audit_area_type is None else int(audit_area_type),
     }
     try:
-        resp = requests.post(AUDIT_URL, json=audit_payload, timeout=5)
+        resp = requests.post(AUDIT_URL, json=audit_payload, headers=API_HEADERS, timeout=5)
         if resp.status_code == 200:
             st.success("Audit saved. Thank you for contributing real data!")
         else:
