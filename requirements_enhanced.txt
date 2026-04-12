@@ -1,0 +1,37 @@
+# SafeRoute Delhi ML - Production Requirements
+# Updated with all enhancements
+
+# Core ML / Data Science
+numpy>=1.24.0
+pandas>=1.5.0
+scikit-learn>=1.2.0
+joblib>=1.2.0
+
+# Class Imbalance Handling
+imbalanced-learn>=0.10.0
+
+# Explainability & Interpretability
+shap>=0.41.0
+matplotlib>=3.5.0
+
+# API Framework
+fastapi>=0.95.0
+uvicorn>=0.20.0
+pydantic>=1.10.0
+
+# Other utilities
+requests>=2.28.0
+python-dotenv>=0.20.0
+
+# Optional: For interactive notebooks
+jupyter>=1.0.0
+ipykernel>=6.20.0
+
+# Optional: For Streamlit frontend
+streamlit>=1.20.0
+
+# Development (optional)
+# pytest>=7.2.0
+# black>=22.12.0
+# pylint>=2.16.0
+# mypy>=0.991

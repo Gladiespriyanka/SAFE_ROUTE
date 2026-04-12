@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 
 # Add src/ to path if running from project root
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9,10 +10,20 @@ if PROJECT_ROOT not in sys.path:
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
-from predict_utils import load_model_and_features, predict_safety, LABELS
-def predict_from_input():
-    print("Enter route details to get a safety prediction:\n")
+from predict_utils_enhanced import (
+    load_model_and_feature_cols,
+    predict_safety,
+    format_prediction_output,
+)
 
+def predict_from_input():
+    """Interactive CLI for route safety prediction."""
+    print("\n" + "="*70)
+    print("SAFEROUTE DELHI - INTERACTIVE ROUTE SAFETY PREDICTOR")
+    print("="*70)
+    print("\nEnter route details to get a safety prediction.\n")
+
+    # Core features
     lighting = int(input("Lighting level (0=very poor, 1=ok, 2=good): "))
     crowd = int(input("Crowd level (0=empty, 1=some people, 2=busy): "))
     distance = float(input("Distance to main road in meters (e.g. 250): "))
@@ -21,11 +32,20 @@ def predict_from_input():
     cctv = int(input("CCTV present? (0=no, 1=yes): "))
     hour = int(input("Hour of day (0–23, 0 = midnight): "))
     weekend = int(input("Is it weekend? (0=no, 1=yes): "))
+    
+    # Additional features
+    area_type = int(input("Area type (0=residential, 1=commercial, 2=office): "))
+    near_transit = int(input("Near metro/bus stop? (0=no, 1=yes): "))
+    incidents = int(input("Past incidents level (0=low, 1=medium, 2=high): "))
+    group = int(input("Traveling in a group? (0=no, 1=yes): "))
 
-    model, feature_cols = load_model_and_features()
+    # Load model
+    print("\nLoading model...")
+    pipeline, feature_cols = load_model_and_feature_cols()
 
+    # Make prediction
     result = predict_safety(
-        model=model,
+        pipeline=pipeline,
         feature_cols=feature_cols,
         lighting_level=lighting,
         crowd_level=crowd,
@@ -35,19 +55,32 @@ def predict_from_input():
         cctv_present=cctv,
         hour_of_day=hour,
         is_weekend=weekend,
+        area_type=area_type,
+        near_metro_or_bus=near_transit,
+        past_incidents_level=incidents,
+        group_travel=group,
+        include_shap=True,
     )
 
-    print("\n=== SafeRoute Delhi Prediction ===")
-    print(f"Predicted safety label: {result['label_text']} ({result['label']})")
-    probs = result["probabilities"]
-    print(
-        f"Probabilities -> Unsafe: {probs['unsafe']:.2f}, "
-        f"Moderate: {probs['moderate']:.2f}, Safe: {probs['safe']:.2f}"
-    )
-    print("\nWhy this prediction?")
-    for r in result["reasons"]:
-        print(f"- {r}")
+    # Display result
+    print(format_prediction_output(result))
+    
+    # Also show JSON format
+    print("\n📋 JSON FORMAT (for API integration):")
+    json_result = {
+        "prediction": result["prediction"],
+        "label": result["label"],
+        "confidence": result["confidence"],
+        "confidence_level": result["confidence_level"],
+        "probabilities": result["probabilities"],
+    }
+    if "shap_explanation" in result:
+        json_result["top_factors"] = [
+            f["feature"] for f in result["shap_explanation"].get("top_factors", [])
+        ]
+    print(json.dumps(json_result, indent=2))
 
 
 if __name__ == "__main__":
     predict_from_input()
+
