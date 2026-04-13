@@ -123,7 +123,7 @@ def sanitize_inputs(
         "area_crime_risk": area_crime_risk,
         "audit_score_mean": audit_score_mean,
         "dist_to_metro_m": dist_to_metro_m,
-        "dist_to_bus_m": dist_to_bus_m,
+        "dist_to_bus_m": dist_to_bus_m,    
         "dist_to_hospital_m": dist_to_hospital_m,
         "dist_to_police_m": dist_to_police_m,
     }
