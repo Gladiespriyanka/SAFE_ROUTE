@@ -1,13 +1,3 @@
-"""
-Enhanced prediction utilities for SafeRoute Delhi ML model.
-
-Features:
-- Predictions with probability/confidence scores
-- SHAP feature importance analysis
-- Data validation and sanitization
-- Human-readable label mapping
-"""
-
 import joblib
 import numpy as np
 import logging
@@ -21,30 +11,23 @@ logger = logging.getLogger(__name__)
 # Label mapping: 0 = Unsafe, 1 = Moderate, 2 = Safe
 LABELS = {
     0: "Unsafe",
-    1: "Moderate", 
-    2: "Safe"
+    1: "Moderate",
+    2: "Safe",
 }
 
 LABEL_DESCRIPTIONS = {
     0: "⚠️  Unsafe - High risk area. Avoid if possible. If necessary, travel in groups.",
     1: "⚠️  Moderate - Mixed conditions. Use caution, especially at night.",
-    2: "✅ Safe - Relatively safer route. Still maintain awareness."
+    2: "✅ Safe - Relatively safer route. Still maintain awareness.",
 }
 
 
 def load_model_and_feature_cols(
-    model_path: str = "models/saferoute_model.pkl",
+    model_path: str = "models/saferoute_model_latest.pkl",
     feature_cols_path: str = "models/feature_cols.pkl",
 ) -> tuple:
     """
     Load the trained pipeline model and feature column order.
-    
-    Args:
-        model_path: Path to the saved pipeline model
-        feature_cols_path: Path to the saved feature columns list
-    
-    Returns:
-        Tuple of (pipeline, feature_cols)
     """
     try:
         pipeline = joblib.load(model_path)
@@ -79,7 +62,7 @@ def sanitize_inputs(
 ) -> Dict[str, float]:
     """
     Validate and sanitize input values, clipping to valid ranges.
-    
+
     Returns dict with cleaned feature values.
     """
     # Core numeric features - 0, 1, 2 scale
@@ -101,10 +84,10 @@ def sanitize_inputs(
 
     # Hour of day (0-23)
     hour_of_day = int(np.clip(hour_of_day, 0, 23))
-    
+
     # Cyclical hour encoding
-    hour_sin = float(np.sin(2 * np.pi * hour_of_day / 24))
-    hour_cos = float(np.cos(2 * np.pi * hour_of_day / 24))
+    hour_sin = float(np.sin(2 * np.pi * hour_of_day / 24.0))
+    hour_cos = float(np.cos(2 * np.pi * hour_of_day / 24.0))
 
     # Optional features with defaults
     def safe_clip(value, lo, hi, default=0.0):
@@ -130,6 +113,8 @@ def sanitize_inputs(
         "shops_open_at_night": shops_open_at_night,
         "police_station_within_1km": police_station_within_1km,
         "cctv_present": cctv_present,
+        "hour_sin": hour_sin,
+        "hour_cos": hour_cos,
         "is_weekend": is_weekend,
         "area_type": area_type,
         "near_metro_or_bus": near_metro_or_bus,
@@ -141,10 +126,7 @@ def sanitize_inputs(
         "dist_to_bus_m": dist_to_bus_m,
         "dist_to_hospital_m": dist_to_hospital_m,
         "dist_to_police_m": dist_to_police_m,
-       "hour_of_day": hour_of_day,
     }
-
-
 def compute_confidence_level(max_probability: float) -> str:
     """Map probability to confidence level."""
     if max_probability >= 0.8:
@@ -165,49 +147,53 @@ def get_shap_explanation(
 ) -> Dict[str, Any]:
     """
     Compute SHAP values for a single prediction.
-    
+
     Returns dict with top 3 contributing factors.
     """
     try:
-        # Build feature array
         import pandas as pd
+
+        # Build feature array
         x_df = pd.DataFrame([feature_values])
         x_df = x_df[feature_cols]  # Ensure correct column order
-        
+
         # Extract classifier from pipeline
-        classifier = pipeline if not hasattr(pipeline, "named_steps") else pipeline.named_steps.get("classifier", pipeline)
-        
+        if hasattr(pipeline, "named_steps"):
+            classifier = pipeline.named_steps.get("classifier", pipeline)
+        else:
+            classifier = pipeline
+
         # Create SHAP explainer
         explainer = shap.TreeExplainer(classifier)
         shap_values = explainer.shap_values(x_df.values)
-        
+
         # Extract SHAP values for predicted class
         if isinstance(shap_values, list):
             sv = shap_values[predicted_class][0]
         else:
             sv = shap_values[0] if len(shap_values.shape) > 1 else shap_values
-        
+
         # Get top 3 factors
         shap_series = pd.Series(np.abs(sv), index=feature_cols)
         top_factors = shap_series.sort_values(ascending=False).head(3)
-        
+
         return {
             "status": "success",
             "top_factors": [
                 {
                     "feature": str(feat),
                     "impact": float(impact),
-                    "rank": i + 1
+                    "rank": i + 1,
                 }
                 for i, (feat, impact) in enumerate(top_factors.items())
-            ]
+            ],
         }
     except Exception as e:
         logger.warning(f"SHAP analysis failed: {e}")
         return {
             "status": "failed",
             "error": str(e),
-            "top_factors": []
+            "top_factors": [],
         }
 
 
@@ -236,17 +222,7 @@ def predict_safety(
 ) -> Dict[str, Any]:
     """
     Main prediction function.
-    
-    Returns comprehensive prediction result with:
-    - prediction: numeric class (0, 1, 2)
-    - label: human-readable label (Unsafe, Moderate, Safe)
-    - confidence: confidence score (0.0 - 1.0)
-    - confidence_level: High/Medium/Low/Very Low
-    - probabilities: full probability distribution
-    - description: human-readable description
-    - shap_explanation: top contributing factors (if include_shap=True)
     """
-    
     # Sanitize inputs
     clean_inputs = sanitize_inputs(
         lighting_level=lighting_level,
@@ -268,20 +244,21 @@ def predict_safety(
         dist_to_hospital_m=dist_to_hospital_m,
         dist_to_police_m=dist_to_police_m,
     )
-    
-    # Build feature array in correct order
+
     import pandas as pd
+
+    # Build feature array in correct order
     x_df = pd.DataFrame([clean_inputs])
     x_df = x_df[feature_cols]  # Ensure correct column order
-    
+
     # Get prediction
     predicted_class = int(pipeline.predict(x_df)[0])
     probabilities = pipeline.predict_proba(x_df)[0]
-    
+
     # Confidence score (max probability)
     confidence = float(np.max(probabilities))
     confidence_level = compute_confidence_level(confidence)
-    
+
     # Build result
     result = {
         "prediction": predicted_class,
@@ -293,16 +270,16 @@ def predict_safety(
             "unsafe": float(probabilities[0]),
             "moderate": float(probabilities[1]) if len(probabilities) > 1 else 0.0,
             "safe": float(probabilities[2]) if len(probabilities) > 2 else 0.0,
-        }
+        },
     }
-    
+
     # Add SHAP explanation if requested
     if include_shap:
         shap_explain = get_shap_explanation(
             pipeline, feature_cols, clean_inputs, predicted_class
         )
         result["shap_explanation"] = shap_explain
-    
+
     return result
 
 
@@ -311,23 +288,23 @@ def format_prediction_output(prediction_result: Dict[str, Any]) -> str:
     Format prediction result as human-readable string.
     """
     output = []
-    output.append("\n" + "="*70)
+    output.append("\n" + "=" * 70)
     output.append("SAFEROUTE DELHI - ROUTE SAFETY PREDICTION")
-    output.append("="*70)
-    
+    output.append("=" * 70)
+
     output.append(f"\n🎯 PREDICTION: {prediction_result['label'].upper()}")
     output.append(f"   {prediction_result['description']}")
-    
+
     output.append(f"\n📊 CONFIDENCE: {prediction_result['confidence_level']}")
     output.append(f"   Confidence Score: {prediction_result['confidence']:.2%}")
-    
+
     output.append(f"\n📈 PROBABILITY BREAKDOWN:")
     for label_name in ["unsafe", "moderate", "safe"]:
         prob = prediction_result["probabilities"][label_name]
         bar_length = int(prob * 20)
         bar = "█" * bar_length + "░" * (20 - bar_length)
         output.append(f"   {label_name.capitalize():<12} {bar} {prob:.2%}")
-    
+
     if "shap_explanation" in prediction_result:
         shap_result = prediction_result["shap_explanation"]
         if shap_result["status"] == "success" and shap_result["top_factors"]:
@@ -338,7 +315,9 @@ def format_prediction_output(prediction_result: Dict[str, Any]) -> str:
                     f"Impact: {factor['impact']:.4f}"
                 )
         elif shap_result["status"] == "failed":
-            output.append(f"\n⚠️  SHAP analysis unavailable: {shap_result.get('error', 'Unknown error')}")
-    
-    output.append("\n" + "="*70)
+            output.append(
+                f"\n⚠️  SHAP analysis unavailable: {shap_result.get('error', 'Unknown error')}"
+            )
+
+    output.append("\n" + "=" * 70)
     return "\n".join(output)

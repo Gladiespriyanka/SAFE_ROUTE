@@ -62,7 +62,8 @@ def log_prediction(payload: dict, result: dict):
     with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         probs = result["probabilities"]
-        conf = result.get("confidence", {})
+        confidence_score = result.get("confidence")
+        confidence_level = result.get("confidence_level")
         writer.writerow(
             [
                 datetime.utcnow().isoformat(),
@@ -80,10 +81,10 @@ def log_prediction(payload: dict, result: dict):
                 payload["near_metro_or_bus"],
                 payload["past_incidents_level"],
                 payload["group_travel"],
+                result.get("prediction"),
                 result["label"],
-                result["label_text"],
-                conf.get("level"),
-                conf.get("score"),
+                confidence_level,
+                confidence_score,
                 probs["unsafe"],
                 probs["moderate"],
                 probs["safe"],
@@ -233,10 +234,12 @@ if st.button("Check safety"):
                 # Log this prediction
                 log_prediction(payload, data)
 
-                label_text = data["label_text"]
+                label_text = data["label"]
+                description = data.get("description", "")
                 probs = data["probabilities"]
-                conf = data.get("confidence", {})
-                reasons_grouped = data.get("reasons_grouped", {})
+                confidence_score = data.get("confidence")
+                confidence_level = data.get("confidence_level")
+                shap_factors = data.get("shap_explanation", {}).get("top_factors", [])
 
                 st.markdown("### 4. Result")
 
@@ -246,11 +249,17 @@ if st.button("Check safety"):
                     unsafe_allow_html=True,
                 )
 
-                if conf:
-                    st.write(
-                        f"**Confidence**: {conf['level']} "
-                        f"({conf['score']:.2f} max class probability)"
-                    )
+                if description:
+                    st.write(description)
+
+                if confidence_score is not None:
+                    if confidence_level:
+                        st.write(
+                            f"**Confidence**: {confidence_level} "
+                            f"({confidence_score:.2f} max class probability)"
+                        )
+                    else:
+                        st.write(f"**Confidence**: {confidence_score:.2f}")
 
                 st.write(
                     f"Probabilities → "
@@ -259,14 +268,18 @@ if st.button("Check safety"):
                     f"**Safe**: {probs['safe']:.2f}"
                 )
 
-                st.markdown("#### Why this prediction?")
+                st.markdown("#### Key contributing factors")
 
-                for group_name, items in reasons_grouped.items():
-                    if not items:
-                        continue
-                    with st.expander(group_name, expanded=(group_name in ["Overall"])):
-                        for r in items:
-                            st.write(f"- {r}")
+                if shap_factors:
+                    for factor in shap_factors:
+                        feature_name = factor.get("feature", "Unknown feature")
+                        impact = factor.get("impact")
+                        if impact is not None:
+                            st.write(f"- {feature_name} (impact {impact:.4f})")
+                        else:
+                            st.write(f"- {feature_name}")
+                else:
+                    st.info("Detailed factor breakdown is not available for this prediction.")
 
                 st.markdown("#### Was this prediction helpful?")
 
@@ -275,8 +288,8 @@ if st.button("Check safety"):
                     if st.button("👍 Yes, feels accurate"):
                         fb_payload = {
                             **payload,
-                            "predicted_label": data["label"],
-                            "predicted_label_text": data["label_text"],
+                            "predicted_label": data["prediction"],
+                            "predicted_label_text": data["label"],
                             "user_agrees": 1,
                             "comment": None,
                         }
@@ -301,8 +314,8 @@ if st.button("Check safety"):
                         if st.button("Submit feedback", key="submit_feedback_button"):
                             fb_payload = {
                                 **payload,
-                                "predicted_label": data["label"],
-                                "predicted_label_text": data["label_text"],
+                                "predicted_label": data["prediction"],
+                                "predicted_label_text": data["label"],
                                 "user_agrees": 0,
                                 "comment": comment or None,
                             }

@@ -6,6 +6,9 @@ from streamlit_folium import st_folium
 from typing import List, Tuple, Dict, Any
 
 API_URL = "http://127.0.0.1:8000/predict"
+API_HEADERS = {
+    "X-API-Key": "SAFEROUTE_SECRET_123"
+}
 
 
 def interpolate_points(
@@ -31,7 +34,7 @@ def call_api_for_point(
     payload["latitude"] = float(lat)
     payload["longitude"] = float(lon)
 
-    resp = requests.post(API_URL, json=payload, timeout=5)
+    resp = requests.post(API_URL, json=payload, headers=API_HEADERS, timeout=5)
     resp.raise_for_status()
     return resp.json()
 

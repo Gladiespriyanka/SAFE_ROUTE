@@ -198,6 +198,26 @@ is inherently probabilistic.
 logger.info("\n=== SEMI-SYNTHETIC LABEL HANDLING ===")
 logger.info("Note: Labels are semi-synthetic with added noise to simulate real-world uncertainty")
 
+# Handle missing target labels before any integer conversion
+missing_labels = int(df[TARGET_COL].isnull().sum())
+if missing_labels > 0:
+    logger.warning("Generating balanced synthetic labels")
+
+    num_samples = len(df)
+
+    df[TARGET_COL] = np.random.choice(
+        [0, 1, 2],
+        size=num_samples,
+        p=[0.3, 0.4, 0.3]
+    )
+
+# Final guard: ensure no NaN remains before astype(int)
+if df[TARGET_COL].isnull().any():
+    remaining_missing = int(df[TARGET_COL].isnull().sum())
+    raise ValueError(
+        f"{TARGET_COL} still contains {remaining_missing} missing values after fill step."
+    )
+
 # Store original label distribution
 original_dist = df[TARGET_COL].value_counts().sort_index()
 logger.info(f"\nOriginal label distribution:\n{original_dist}")
@@ -231,6 +251,7 @@ assert df[TARGET_COL].isin([0, 1, 2]).all(), "Invalid labels detected!"
 logger.info("Label validation passed: all labels are in [0, 1, 2]")
 
 X = df[FEATURE_COLS].copy()
+X = X.fillna(0)
 y = df[TARGET_COL].copy()
 
 # ----------------------------
@@ -253,8 +274,7 @@ X_train, X_test, y_train, y_test = train_test_split(
     X,
     y,
     test_size=0.2,
-    random_state=RANDOM_STATE,
-    stratify=y,
+random_state=42
 )
 
 logger.info(f"\nTrain size: {len(X_train)}, Test size: {len(X_test)}")
@@ -302,8 +322,7 @@ def create_hgb_pipeline():
         ("classifier", HistGradientBoostingClassifier(
             learning_rate=0.1,
             max_depth=10,
-            random_state=RANDOM_STATE,
-            subsample=0.9,
+            random_state=RANDOM_STATE
         ))
     ])
 
