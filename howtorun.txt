@@ -1,0 +1,23 @@
+Step 1: go to project folder
+cd C:\Users\DELL\OneDrive\Desktop\saferoute-delhi-ml
+Step 2: activate venv
+venv\Scripts\activate
+Step 3: run backend
+python -m uvicorn backend.app:app --reload
+✅ You should see:
+Uvicorn running on http://127.0.0.1:8000
+
+👉 DO NOT CLOSE THIS TERMINAL
+
+🟢 TERMINAL 2 — FRONTEND (Streamlit)
+
+Open a new terminal
+
+Step 1:
+cd C:\Users\DELL\OneDrive\Desktop\saferoute-delhi-ml
+Step 2:
+venv\Scripts\activate
+Step 3:
+streamlit run app.py
+✅ You should see:
+Local URL: http://localhost:8501
