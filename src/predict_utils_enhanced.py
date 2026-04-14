@@ -244,6 +244,11 @@ def predict_safety(
         dist_to_hospital_m=dist_to_hospital_m,
         dist_to_police_m=dist_to_police_m,
     )
+    logger.info(
+        "DEBUG_ROUTE_INPUTS "
+        f"clean_inputs={clean_inputs} "
+        f"hour_of_day_raw={hour_of_day}"
+    )
 
     import pandas as pd
 
@@ -258,6 +263,37 @@ def predict_safety(
     # Confidence score (max probability)
     confidence = float(np.max(probabilities))
     confidence_level = compute_confidence_level(confidence)
+
+    # Rule-based override for combinations that are clearly unsafe.
+    ll = clean_inputs["lighting_level"]
+    cl = clean_inputs["crowd_level"]
+    dist = clean_inputs["distance_to_main_road_m"]
+    ps = clean_inputs["police_station_within_1km"]
+    cctv = clean_inputs["cctv_present"]
+    hour = int(np.clip(hour_of_day, 0, 23))
+    travelling_alone = clean_inputs["group_travel"] == 0
+
+    very_poor_light = ll == 0
+    empty_crowd = cl == 0
+    far_from_main = dist >= 200
+    no_police = ps == 0
+    no_cctv = cctv == 0
+    late_night = hour >= 20 or hour <= 4
+
+    if (
+        very_poor_light
+        and empty_crowd
+        and far_from_main
+        and no_police
+        and no_cctv
+        and late_night
+        and travelling_alone
+    ):
+        predicted_class = 0
+        probabilities = np.array([0.9, 0.07, 0.03], dtype=float)
+        confidence = float(np.max(probabilities))
+        confidence_level = compute_confidence_level(confidence)
+        logger.info("Applied unsafe rule-based override for high-risk route inputs")
 
     # Build result
     result = {

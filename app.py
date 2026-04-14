@@ -5,7 +5,9 @@ from datetime import datetime
 import requests
 import streamlit as st
 
-API_URL = "http://127.0.0.1:8000/predict"
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+API_URL = f"{BACKEND_URL}/predict"
 AUDIT_URL = "http://127.0.0.1:8000/audit"
 API_BASE = "http://127.0.0.1:8000"
 
