@@ -3,10 +3,14 @@ import numpy as np
 import logging
 from typing import Dict, Any, Optional
 import shap
+from realtime_features import get_weather_data  # ✅ REAL-TIME WEATHER
+from traffic_features import get_traffic_data  # ✅ REAL-TIME TRAFFIC
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 # Label mapping: 0 = Unsafe, 1 = Moderate, 2 = Safe
 LABELS = {
@@ -21,23 +25,24 @@ LABEL_DESCRIPTIONS = {
     2: "✅ Safe - Relatively safer route. Still maintain awareness.",
 }
 
+# Feature mapping
+FEATURE_NAME_MAP = {
+    "lighting_level": "poor lighting",
+    "crowd_level": "low crowd density",
+    "past_incidents_level": "high past incidents",
+    "distance_to_main_road_m": "far from main road",
+    "cctv_present": "lack of CCTV coverage",
+    "police_station_within_1km": "no nearby police station",
+}
+
 
 def load_model_and_feature_cols(
     model_path: str = "models/saferoute_model_latest.pkl",
     feature_cols_path: str = "models/feature_cols.pkl",
 ) -> tuple:
-    """
-    Load the trained pipeline model and feature column order.
-    """
-    try:
-        pipeline = joblib.load(model_path)
-        feature_cols = joblib.load(feature_cols_path)
-        logger.info(f"Loaded model from {model_path}")
-        logger.info(f"Loaded {len(feature_cols)} feature columns")
-        return pipeline, feature_cols
-    except FileNotFoundError as e:
-        logger.error(f"Failed to load model: {e}")
-        raise
+    pipeline = joblib.load(model_path)
+    feature_cols = joblib.load(feature_cols_path)
+    return pipeline, feature_cols
 
 
 def sanitize_inputs(
@@ -60,21 +65,14 @@ def sanitize_inputs(
     dist_to_hospital_m: Optional[float] = None,
     dist_to_police_m: Optional[float] = None,
 ) -> Dict[str, float]:
-    """
-    Validate and sanitize input values, clipping to valid ranges.
 
-    Returns dict with cleaned feature values.
-    """
-    # Core numeric features - 0, 1, 2 scale
     lighting_level = int(np.clip(lighting_level, 0, 2))
     crowd_level = int(np.clip(crowd_level, 0, 2))
     area_type = int(np.clip(area_type, 0, 2))
     past_incidents_level = int(np.clip(past_incidents_level, 0, 2))
 
-    # Distance feature (meters)
     distance_to_main_road_m = float(np.clip(distance_to_main_road_m, 0, 5000))
 
-    # Binary features
     shops_open_at_night = 1 if shops_open_at_night else 0
     police_station_within_1km = 1 if police_station_within_1km else 0
     cctv_present = 1 if cctv_present else 0
@@ -82,31 +80,11 @@ def sanitize_inputs(
     near_metro_or_bus = 1 if near_metro_or_bus else 0
     group_travel = 1 if group_travel else 0
 
-    # Hour of day (0-23)
     hour_of_day = int(np.clip(hour_of_day, 0, 23))
-
-    # Cyclical hour encoding
     hour_sin = float(np.sin(2 * np.pi * hour_of_day / 24.0))
     hour_cos = float(np.cos(2 * np.pi * hour_of_day / 24.0))
 
-    # Optional features with defaults
-    def safe_clip(value, lo, hi, default=0.0):
-        if value is None:
-            return float(default)
-        try:
-            v = float(value)
-            return float(np.clip(v, lo, hi))
-        except (ValueError, TypeError):
-            return float(default)
-
-    area_crime_risk = safe_clip(area_crime_risk, 0.0, 3.0, 0.0)
-    audit_score_mean = safe_clip(audit_score_mean, 0.0, 2.0, 0.0)
-    dist_to_metro_m = safe_clip(dist_to_metro_m, 0.0, 10000.0, 0.0)
-    dist_to_bus_m = safe_clip(dist_to_bus_m, 0.0, 10000.0, 0.0)
-    dist_to_hospital_m = safe_clip(dist_to_hospital_m, 0.0, 10000.0, 0.0)
-    dist_to_police_m = safe_clip(dist_to_police_m, 0.0, 10000.0, 0.0)
-
-    return {
+    clean = {
         "lighting_level": lighting_level,
         "crowd_level": crowd_level,
         "distance_to_main_road_m": distance_to_main_road_m,
@@ -120,15 +98,26 @@ def sanitize_inputs(
         "near_metro_or_bus": near_metro_or_bus,
         "past_incidents_level": past_incidents_level,
         "group_travel": group_travel,
-        "area_crime_risk": area_crime_risk,
-        "audit_score_mean": audit_score_mean,
-        "dist_to_metro_m": dist_to_metro_m,
-        "dist_to_bus_m": dist_to_bus_m,    
-        "dist_to_hospital_m": dist_to_hospital_m,
-        "dist_to_police_m": dist_to_police_m,
     }
+
+    # Optional features (if you trained with them, they must exist)
+    if area_crime_risk is not None:
+        clean["area_crime_risk"] = float(area_crime_risk)
+    if audit_score_mean is not None:
+        clean["audit_score_mean"] = float(audit_score_mean)
+    if dist_to_metro_m is not None:
+        clean["dist_to_metro_m"] = float(dist_to_metro_m)
+    if dist_to_bus_m is not None:
+        clean["dist_to_bus_m"] = float(dist_to_bus_m)
+    if dist_to_hospital_m is not None:
+        clean["dist_to_hospital_m"] = float(dist_to_hospital_m)
+    if dist_to_police_m is not None:
+        clean["dist_to_police_m"] = float(dist_to_police_m)
+
+    return clean
+
+
 def compute_confidence_level(max_probability: float) -> str:
-    """Map probability to confidence level."""
     if max_probability >= 0.8:
         return "High"
     elif max_probability >= 0.6:
@@ -145,56 +134,30 @@ def get_shap_explanation(
     feature_values: Dict[str, float],
     predicted_class: int,
 ) -> Dict[str, Any]:
-    """
-    Compute SHAP values for a single prediction.
-
-    Returns dict with top 3 contributing factors.
-    """
     try:
         import pandas as pd
 
-        # Build feature array
-        x_df = pd.DataFrame([feature_values])
-        x_df = x_df[feature_cols]  # Ensure correct column order
+        x_df = pd.DataFrame([feature_values])[feature_cols]
 
-        # Extract classifier from pipeline
-        if hasattr(pipeline, "named_steps"):
-            classifier = pipeline.named_steps.get("classifier", pipeline)
-        else:
-            classifier = pipeline
-
-        # Create SHAP explainer
+        classifier = pipeline.named_steps.get("classifier", pipeline)
         explainer = shap.TreeExplainer(classifier)
         shap_values = explainer.shap_values(x_df.values)
 
-        # Extract SHAP values for predicted class
-        if isinstance(shap_values, list):
-            sv = shap_values[predicted_class][0]
-        else:
-            sv = shap_values[0] if len(shap_values.shape) > 1 else shap_values
+        sv = shap_values[predicted_class][0]
 
-        # Get top 3 factors
         shap_series = pd.Series(np.abs(sv), index=feature_cols)
         top_factors = shap_series.sort_values(ascending=False).head(3)
 
         return {
             "status": "success",
             "top_factors": [
-                {
-                    "feature": str(feat),
-                    "impact": float(impact),
-                    "rank": i + 1,
-                }
-                for i, (feat, impact) in enumerate(top_factors.items())
+                {"feature": str(feat), "impact": float(impact)}
+                for feat, impact in top_factors.items()
             ],
         }
-    except Exception as e:
-        logger.warning(f"SHAP analysis failed: {e}")
-        return {
-            "status": "failed",
-            "error": str(e),
-            "top_factors": [],
-        }
+
+    except Exception:
+        return {"status": "failed", "top_factors": []}
 
 
 def predict_safety(
@@ -208,6 +171,10 @@ def predict_safety(
     cctv_present: int,
     hour_of_day: int,
     is_weekend: int,
+    latitude: float = 28.61,
+    longitude: float = 77.23,
+    dest_lat: float = 28.65,
+    dest_lon: float = 77.20,
     area_type: int = 0,
     near_metro_or_bus: int = 0,
     past_incidents_level: int = 0,
@@ -220,140 +187,145 @@ def predict_safety(
     dist_to_police_m: Optional[float] = None,
     include_shap: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Main prediction function.
-    """
-    # Sanitize inputs
-    clean_inputs = sanitize_inputs(
-        lighting_level=lighting_level,
-        crowd_level=crowd_level,
-        distance_to_main_road_m=distance_to_main_road_m,
-        shops_open_at_night=shops_open_at_night,
-        police_station_within_1km=police_station_within_1km,
-        cctv_present=cctv_present,
-        hour_of_day=hour_of_day,
-        is_weekend=is_weekend,
-        area_type=area_type,
-        near_metro_or_bus=near_metro_or_bus,
-        past_incidents_level=past_incidents_level,
-        group_travel=group_travel,
-        area_crime_risk=area_crime_risk,
-        audit_score_mean=audit_score_mean,
-        dist_to_metro_m=dist_to_metro_m,
-        dist_to_bus_m=dist_to_bus_m,
-        dist_to_hospital_m=dist_to_hospital_m,
-        dist_to_police_m=dist_to_police_m,
-    )
-    logger.info(
-        "DEBUG_ROUTE_INPUTS "
-        f"clean_inputs={clean_inputs} "
-        f"hour_of_day_raw={hour_of_day}"
-    )
 
     import pandas as pd
 
-    # Build feature array in correct order
-    x_df = pd.DataFrame([clean_inputs])
-    x_df = x_df[feature_cols]  # Ensure correct column order
+    # 1. Clean inputs
+    clean_inputs = sanitize_inputs(
+        lighting_level, crowd_level, distance_to_main_road_m,
+        shops_open_at_night, police_station_within_1km,
+        cctv_present, hour_of_day, is_weekend,
+        area_type, near_metro_or_bus,
+        past_incidents_level, group_travel,
+        area_crime_risk, audit_score_mean,
+        dist_to_metro_m, dist_to_bus_m,
+        dist_to_hospital_m, dist_to_police_m,
+    )
 
-    # Get prediction
-    predicted_class = int(pipeline.predict(x_df)[0])
+    # 🔹 Fill missing optional features with defaults (so all feature_cols exist)
+    optional_features = [
+        "area_crime_risk",
+        "audit_score_mean",
+        "dist_to_metro_m",
+        "dist_to_bus_m",
+        "dist_to_hospital_m",
+        "dist_to_police_m",
+    ]
+    for f in optional_features:
+        if f not in clean_inputs:
+            clean_inputs[f] = 0.0
+
+    # 2. REAL-TIME WEATHER
+    weather = get_weather_data(lat=latitude, lon=longitude)
+
+    # 3. REAL-TIME TRAFFIC
+    traffic = get_traffic_data(
+        start_lat=latitude,
+        start_lon=longitude,
+        end_lat=dest_lat,
+        end_lon=dest_lon
+    )
+
+    # 4. Model input
+    x_df = pd.DataFrame([clean_inputs])[feature_cols]
+
     probabilities = pipeline.predict_proba(x_df)[0]
+    predicted_class = int(np.argmax(probabilities))
 
-    # Confidence score (max probability)
     confidence = float(np.max(probabilities))
     confidence_level = compute_confidence_level(confidence)
 
-    # Rule-based override for combinations that are clearly unsafe.
-    ll = clean_inputs["lighting_level"]
-    cl = clean_inputs["crowd_level"]
-    dist = clean_inputs["distance_to_main_road_m"]
-    ps = clean_inputs["police_station_within_1km"]
-    cctv = clean_inputs["cctv_present"]
-    hour = int(np.clip(hour_of_day, 0, 23))
-    travelling_alone = clean_inputs["group_travel"] == 0
-
-    very_poor_light = ll == 0
-    empty_crowd = cl == 0
-    far_from_main = dist >= 200
-    no_police = ps == 0
-    no_cctv = cctv == 0
-    late_night = hour >= 20 or hour <= 4
-
+    # Manual override for extreme unsafe pattern
     if (
-        very_poor_light
-        and empty_crowd
-        and far_from_main
-        and no_police
-        and no_cctv
-        and late_night
-        and travelling_alone
+        clean_inputs["lighting_level"] == 0
+        and clean_inputs["crowd_level"] == 0
+        and clean_inputs["distance_to_main_road_m"] >= 200
+        and clean_inputs["police_station_within_1km"] == 0
+        and clean_inputs["cctv_present"] == 0
+        and clean_inputs["group_travel"] == 0
     ):
         predicted_class = 0
-        probabilities = np.array([0.9, 0.07, 0.03], dtype=float)
-        confidence = float(np.max(probabilities))
-        confidence_level = compute_confidence_level(confidence)
-        logger.info("Applied unsafe rule-based override for high-risk route inputs")
+        probabilities = np.array([0.9, 0.07, 0.03])
 
-    # Build result
-    result = {
-        "prediction": predicted_class,
-        "label": LABELS[predicted_class],
-        "description": LABEL_DESCRIPTIONS[predicted_class],
-        "confidence": confidence,
-        "confidence_level": confidence_level,
-        "probabilities": {
-            "unsafe": float(probabilities[0]),
-            "moderate": float(probabilities[1]) if len(probabilities) > 1 else 0.0,
-            "safe": float(probabilities[2]) if len(probabilities) > 2 else 0.0,
-        },
-    }
+    # Base risk from unsafe probability
+    risk_score = int(
+    (probabilities[0] * 100) +   # unsafe weight
+    (probabilities[1] * 50)      # moderate weight
+)
 
-    # Add SHAP explanation if requested
+    # SHAP factors
+    factors = []
     if include_shap:
         shap_explain = get_shap_explanation(
             pipeline, feature_cols, clean_inputs, predicted_class
         )
-        result["shap_explanation"] = shap_explain
+    else:
+        shap_explain = {"status": "skipped", "top_factors": []}
 
-    return result
+    if shap_explain["status"] == "success":
+        factors.extend([
+            FEATURE_NAME_MAP.get(f["feature"], f["feature"])
+            for f in shap_explain["top_factors"]
+        ])
 
+    # REAL-TIME RISK BOOST
 
-def format_prediction_output(prediction_result: Dict[str, Any]) -> str:
-    """
-    Format prediction result as human-readable string.
-    """
-    output = []
-    output.append("\n" + "=" * 70)
-    output.append("SAFEROUTE DELHI - ROUTE SAFETY PREDICTION")
-    output.append("=" * 70)
+    # TRAFFIC RISK LOGIC
+    if traffic.get("congestion", 0.0) < 0.05 and clean_inputs["crowd_level"] == 0:
+        risk_score += 10
+        factors.append("low traffic (isolated road)")
 
-    output.append(f"\n🎯 PREDICTION: {prediction_result['label'].upper()}")
-    output.append(f"   {prediction_result['description']}")
+    elif traffic.get("congestion", 0.0) > 0.2:
+        risk_score -= 5
+        factors.append("high traffic (safer due to crowd)")
 
-    output.append(f"\n📊 CONFIDENCE: {prediction_result['confidence_level']}")
-    output.append(f"   Confidence Score: {prediction_result['confidence']:.2%}")
+    # WEATHER RISK LOGIC
+    if weather.get("rain", 0) == 1 and clean_inputs["lighting_level"] == 0:
+        risk_score += 10
+        factors.append("rain + poor visibility")
 
-    output.append(f"\n📈 PROBABILITY BREAKDOWN:")
-    for label_name in ["unsafe", "moderate", "safe"]:
-        prob = prediction_result["probabilities"][label_name]
-        bar_length = int(prob * 20)
-        bar = "█" * bar_length + "░" * (20 - bar_length)
-        output.append(f"   {label_name.capitalize():<12} {bar} {prob:.2%}")
+    if weather.get("fog", 0) == 1:
+        risk_score += 8
+        factors.append("foggy conditions")
 
-    if "shap_explanation" in prediction_result:
-        shap_result = prediction_result["shap_explanation"]
-        if shap_result["status"] == "success" and shap_result["top_factors"]:
-            output.append(f"\n🔍 TOP CONTRIBUTING FACTORS:")
-            for factor in shap_result["top_factors"]:
-                output.append(
-                    f"   {factor['rank']}. {factor['feature']:<30} "
-                    f"Impact: {factor['impact']:.4f}"
-                )
-        elif shap_result["status"] == "failed":
-            output.append(
-                f"\n⚠️  SHAP analysis unavailable: {shap_result.get('error', 'Unknown error')}"
-            )
+    # TIME-OF-DAY RISK LOGIC
+    hour = hour_of_day
+    if (hour >= 22 or hour <= 4) and clean_inputs["crowd_level"] == 0:
+        risk_score += 12
+        factors.append("late night + isolated area")
 
-    output.append("\n" + "=" * 70)
-    return "\n".join(output)
+    # Clamp risk score
+    risk_score = min(risk_score, 100)
+
+    if not factors:
+        factors = ["no major risk factors"]
+
+    # 🔹 CLEAN FACTORS: remove duplicates, preserve order
+    seen = set()
+    deduped_factors = []
+    for f in factors:
+        if f not in seen:
+            seen.add(f)
+            deduped_factors.append(f)
+
+    return {
+        "prediction": predicted_class,
+        "label": LABELS[predicted_class],
+        "description": LABEL_DESCRIPTIONS[predicted_class],
+        "risk_score": risk_score,
+        "location": {
+            "lat": latitude,
+            "lon": longitude
+        },
+        "factors": deduped_factors,
+        "confidence": confidence,
+        "confidence_level": confidence_level,
+        "probabilities": {
+            "unsafe": float(probabilities[0]),
+            "moderate": float(probabilities[1]),
+            "safe": float(probabilities[2]),
+        },
+        "weather": weather,
+        "traffic": traffic,
+        "shap_explanation": shap_explain,
+    }

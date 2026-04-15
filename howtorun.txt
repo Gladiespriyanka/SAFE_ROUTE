@@ -1,2 +1,19 @@
-1 terminal run docker compose 
-2 terminal run docker ps , docker compose logs -f frontend
+1 terminal run 
+docker compose up --build
+2 terminal run 
+docker ps , docker compose logs -f frontend
+
+
+
+
+2. Replace in-memory storage with database
+❌ Current:
+feedback stored in RAM
+audits lost on restart
+✅ Upgrade:
+
+Use:
+
+SQLite (simple)
+OR
+Firebase / MongoDB (better)

@@ -1,7 +1,10 @@
 fastapi
 uvicorn
 pydantic
+pydantic-settings
 numpy
 pandas
 scikit-learn
 shap
+requests
+python-dotenv

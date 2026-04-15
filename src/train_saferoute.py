@@ -55,7 +55,7 @@ np.random.seed(RANDOM_STATE)
 # ─────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────
-DATA_PATH = "data/saferoute_delhi.csv"
+DATA_PATH = "data/saferoute_delhi_v2.csv"
 MODEL_SAVE_DIR = "models"
 ARTIFACT_DIR = "artifacts"
 os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
@@ -379,8 +379,8 @@ for name, dfx in [("Unsafe", df_unsafe), ("Safe", df_safe), ("Moderate", df_mode
         dfx["safety_label"] = oracle
 
 # Combine everything
-frames = [df_orig] if len(df_orig) > 0 else []
-frames += [df_unsafe, df_safe, df_moderate]
+frames = [df_unsafe, df_safe, df_moderate]
+
 df = pd.concat(frames, ignore_index=True)
 
 # Fill any remaining missing values

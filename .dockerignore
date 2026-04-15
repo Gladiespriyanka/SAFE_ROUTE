@@ -4,7 +4,7 @@ __pycache__
 *.pyc
 
 data/
-models/
+
 logs/
 artifacts/
 
@@ -12,5 +12,4 @@ artifacts/
 .gitignore
 
 *.csv
-*.pkl
 *.joblib

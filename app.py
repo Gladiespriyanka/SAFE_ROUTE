@@ -4,6 +4,8 @@ from datetime import datetime
 
 import requests
 import streamlit as st
+import folium
+from streamlit_folium import st_folium
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
@@ -11,7 +13,9 @@ API_URL = f"{BACKEND_URL}/predict"
 AUDIT_URL = "http://127.0.0.1:8000/audit"
 API_BASE = "http://127.0.0.1:8000"
 
-API_KEY = "SAFEROUTE_SECRET_123"  # must match backend
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise ValueError("API_KEY not set in environment variables")
 API_HEADERS = {"X-API-Key": API_KEY}
 
 st.set_page_config(page_title="SafeRoute Delhi", page_icon="🛣️", layout="centered")
@@ -21,6 +25,22 @@ LABEL_COLORS = {
     "Moderate": "orange",
     "Safe": "green",
 }
+
+# Professional Styling
+st.markdown(
+    """
+<style>
+    .stMetric {
+        background-color: #0e1117;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        border: 1px solid #30363d;
+    }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 LOG_DIR = "logs"
 LOG_FILE = os.path.join(LOG_DIR, "predictions.csv")
@@ -204,9 +224,15 @@ with col_b:
     )
 
 # ----------------------------
-# Prediction + feedback
+# Prediction + feedback (stateful)
 # ----------------------------
-if st.button("Check safety"):
+if "prediction_result" not in st.session_state:
+    st.session_state.prediction_result = None
+if "prediction_payload" not in st.session_state:
+    st.session_state.prediction_payload = None
+
+
+def run_prediction():
     payload = {
         "latitude": float(latitude),
         "longitude": float(longitude),
@@ -228,172 +254,242 @@ if st.button("Check safety"):
         resp = requests.post(API_URL, json=payload, headers=API_HEADERS, timeout=5)
         if resp.status_code != 200:
             st.error(f"API error: {resp.status_code} – {resp.text}")
-        else:
-            data = resp.json()
-            if "error" in data:
-                st.error(f"Backend error: {data['error']}")
-            else:
-                # Log this prediction
-                log_prediction(payload, data)
+            return
+        data = resp.json()
+        if "error" in data:
+            st.error(f"Backend error: {data['error']}")
+            return
 
-                label_text = data["label"]
-                description = data.get("description", "")
-                probs = data["probabilities"]
-                confidence_score = data.get("confidence")
-                confidence_level = data.get("confidence_level")
-                shap_factors = data.get("shap_explanation", {}).get("top_factors", [])
+        st.session_state.prediction_result = data
+        st.session_state.prediction_payload = payload
 
-                st.markdown("### 4. Result")
-
-                color = LABEL_COLORS.get(label_text, "gray")
-                st.markdown(
-                    f"<h3 style='color:{color}'>Predicted safety: {label_text}</h3>",
-                    unsafe_allow_html=True,
-                )
-
-                if description:
-                    st.write(description)
-
-                if confidence_score is not None:
-                    if confidence_level:
-                        st.write(
-                            f"**Confidence**: {confidence_level} "
-                            f"({confidence_score:.2f} max class probability)"
-                        )
-                    else:
-                        st.write(f"**Confidence**: {confidence_score:.2f}")
-
-                st.write(
-                    f"Probabilities → "
-                    f"**Unsafe**: {probs['unsafe']:.2f}, "
-                    f"**Moderate**: {probs['moderate']:.2f}, "
-                    f"**Safe**: {probs['safe']:.2f}"
-                )
-
-                st.markdown("#### Key contributing factors")
-
-                if shap_factors:
-                    for factor in shap_factors:
-                        feature_name = factor.get("feature", "Unknown feature")
-                        impact = factor.get("impact")
-                        if impact is not None:
-                            st.write(f"- {feature_name} (impact {impact:.4f})")
-                        else:
-                            st.write(f"- {feature_name}")
-                else:
-                    st.info("Detailed factor breakdown is not available for this prediction.")
-
-                st.markdown("#### Was this prediction helpful?")
-
-                col_yes, col_no = st.columns(2)
-                with col_yes:
-                    if st.button("👍 Yes, feels accurate"):
-                        fb_payload = {
-                            **payload,
-                            "predicted_label": data["prediction"],
-                            "predicted_label_text": data["label"],
-                            "user_agrees": 1,
-                            "comment": None,
-                        }
-                        fb_resp = requests.post(
-                            "http://127.0.0.1:8000/feedback",
-                            json=fb_payload,
-                            headers=API_HEADERS,
-                            timeout=5,
-                        )
-                        if fb_resp.status_code == 200:
-                            st.success("Thanks for your feedback!")
-                        else:
-                            st.error("Failed to send feedback.")
-
-                with col_no:
-                    if st.button("👎 Not accurate"):
-                        comment = st.text_input(
-                            "What felt wrong or missing?",
-                            key="feedback_comment",
-                            placeholder="Optional: e.g., 'Area usually feels safer than this score.'",
-                        )
-                        if st.button("Submit feedback", key="submit_feedback_button"):
-                            fb_payload = {
-                                **payload,
-                                "predicted_label": data["prediction"],
-                                "predicted_label_text": data["label"],
-                                "user_agrees": 0,
-                                "comment": comment or None,
-                            }
-                            fb_resp = requests.post(
-                                "http://127.0.0.1:8000/feedback",
-                                json=fb_payload,
-                                headers=API_HEADERS,
-                                timeout=5,
-                            )
-                            if fb_resp.status_code == 200:
-                                st.success("Feedback recorded, thank you!")
-                            else:
-                                st.error("Failed to send feedback.")
-
-                # --- Nearby audits & POI context ---
-                st.markdown("### Nearby audits & POI context")
-
-                lat = latitude  # main location
-                lon = longitude
-
-                cols = st.columns(2)
-
-                # --- Left: POI context ---
-                with cols[0]:
-                    st.subheader("Nearest public infrastructure")
-
-                    try:
-                        resp_poi = requests.get(
-                            f"{API_BASE}/poi_context",
-                            params={"lat": lat, "lon": lon},
-                            headers=API_HEADERS,
-                            timeout=5,
-                        )
-                        if resp_poi.status_code == 200:
-                            poi_data = resp_poi.json()
-                            st.write(f"- **Metro**: {poi_data.get('dist_to_metro_m', 0):.0f} m")
-                            st.write(f"- **Bus stop**: {poi_data.get('dist_to_bus_m', 0):.0f} m")
-                            st.write(f"- **Hospital**: {poi_data.get('dist_to_hospital_m', 0):.0f} m")
-                            st.write(f"- **Police station**: {poi_data.get('dist_to_police_m', 0):.0f} m")
-                        else:
-                            st.info("POI context not available right now.")
-                    except Exception as e:
-                        st.info(f"Could not load POI context: {e}")
-
-                # --- Right: Nearby audits ---
-                with cols[1]:
-                    st.subheader("Recent audits within 300m")
-
-                    try:
-                        resp_audits = requests.get(
-                            f"{API_BASE}/audit/nearby",
-                            params={"lat": lat, "lon": lon, "radius_m": 300.0, "limit": 10},
-                            headers=API_HEADERS,
-                            timeout=5,
-                        )
-                        if resp_audits.status_code == 200:
-                            audits = resp_audits.json()
-                            if not audits:
-                                st.write("No audits logged around this point yet.")
-                            else:
-                                for a in audits:
-                                    label_map = {0: "Very unsafe", 1: "Okay", 2: "Feels safe"}
-                                    label_text = label_map.get(a.get("perceived_safety", 0), "Unknown")
-                                    dist_m = a.get("distance_m", 0.0)
-                                    comment = a.get("comment") or ""
-                                    st.markdown(
-                                        f"- {label_text} ({dist_m:.0f} m away)"
-                                        + (f" — _{comment}_" if comment else "")
-                                    )
-                        else:
-                            st.info("Could not load nearby audits.")
-                    except Exception as e:
-                        st.info(f"Could not load nearby audits: {e}")
+        log_prediction(payload, data)
 
     except Exception as e:
         st.error(f"Failed to call API: {e}")
+
+
+if st.button("Check safety"):
+    run_prediction()
+
+data = st.session_state.prediction_result
+payload = st.session_state.prediction_payload
+
+if data is not None and payload is not None:
+    label_text = data["label"]
+    description = data.get("description", "")
+    probs = data["probabilities"]
+    confidence_score = data.get("confidence")
+    confidence_level = data.get("confidence_level")
+    shap_factors = data.get("shap_explanation", {}).get("top_factors", [])
+
+    st.markdown("## 🧠 Route Safety Analysis")
+
+    # 1. Summary Cards
+    m_col1, m_col2, m_col3 = st.columns(3)
+    with m_col1:
+        st.metric("Risk Score", data.get("risk_score", 0))
+    with m_col2:
+        st.metric("Confidence", f"{data.get('confidence', 0):.2f}")
+    with m_col3:
+        label = data["label"]
+        if label == "Unsafe":
+            st.error("Unsafe")
+        elif label == "Moderate":
+            st.warning("Moderate")
+        else:
+            st.success("Safe")
+
+    st.markdown("### 4. Result")
+
+    # 2. Map View
+    st.markdown("### 🗺 Route Overview")
+    m = folium.Map(location=[latitude, longitude], zoom_start=14)
+    folium.Marker([latitude, longitude], popup="Current Location").add_to(m)
+    st_folium(m, width=1000, height=450)
+
+    color = LABEL_COLORS.get(label_text, "gray")
+    st.markdown(
+        f"<h3 style='color:{color}'>Predicted safety: {label_text}</h3>",
+        unsafe_allow_html=True,
+    )
+
+    if description:
+        st.write(description)
+
+    if confidence_score is not None and confidence_level:
+        st.write(
+            f"**Confidence**: {confidence_level} "
+            f"({confidence_score:.2f} max class probability)"
+        )
+
+    st.markdown("### ⚠️ Analysis Details")
+    f_col1, f_col2 = st.columns(2)
+
+    factors = data.get("factors", [])
+    with f_col1:
+        st.markdown("#### Risk Factors")
+        if factors:
+            for f in factors:
+                st.markdown(f"- {f}")
+        else:
+            if confidence_score is not None:
+                st.write(f"**Confidence**: {confidence_score:.2f}")
+            st.success("No major risk factors detected")
+
+    with f_col2:
+        st.markdown("#### AI Explanation")
+        if factors:
+            explanation = f"This route is considered **{label_text.lower()}** due to: "
+            explanation += ", ".join(factors) + "."
+            st.info(explanation)
+        else:
+            st.info("Standard conditions detected for this area.")
+
+    st.write(
+        f"Probabilities → "
+        f"**Unsafe**: {probs['unsafe']:.2f}, "
+        f"**Moderate**: {probs['moderate']:.2f}, "
+        f"**Safe**: {probs['safe']:.2f}"
+    )
+
+    st.markdown("### 🌍 Context Signals")
+    ctx_col1, ctx_col2 = st.columns(2)
+
+    with ctx_col1:
+        st.markdown("#### 🌧 Weather")
+        weather = data.get("weather", {})
+        st.write(f"Rain: {'Yes' if weather.get('rain') else 'No'}")
+        st.write(f"Fog: {'Yes' if weather.get('fog') else 'No'}")
+        st.write(f"Visibility: {weather.get('visibility', 1.0):.2f}")
+
+    with ctx_col2:
+        st.markdown("#### 🚦 Traffic")
+        traffic = data.get("traffic", {})
+        st.write(f"Distance: {traffic.get('distance_km', 0):.2f} km")
+        st.write(f"Time: {traffic.get('duration_hr', 0) * 60:.1f} mins")
+        st.write(f"Congestion: {traffic.get('congestion', 0):.3f}")
+
+    st.markdown("#### Key contributing factors")
+    if shap_factors:
+        for factor in shap_factors:
+            feature_name = factor.get("feature", "Unknown feature")
+            impact = factor.get("impact")
+            if impact is not None:
+                st.write(f"- {feature_name} (impact {impact:.4f})")
+            else:
+                st.write(f"- {feature_name}")
+    else:
+        st.info("Detailed factor breakdown is not available for this prediction.")
+
+    st.markdown("#### Was this prediction helpful?")
+
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        if st.button("👍 Yes, feels accurate"):
+            fb_payload = {
+                **payload,
+                "predicted_label": data["prediction"],
+                "predicted_label_text": data["label"],
+                "user_agrees": 1,
+                "comment": None,
+            }
+            fb_resp = requests.post(
+                f"{API_BASE}/feedback",
+                json=fb_payload,
+                headers=API_HEADERS,
+                timeout=5,
+            )
+            if fb_resp.status_code == 200:
+                st.success("Thanks for your feedback!")
+            else:
+                st.error("Failed to send feedback.")
+
+    with col_no:
+        if st.button("👎 Not accurate"):
+            comment = st.text_input(
+                "What felt wrong or missing?",
+                key="feedback_comment",
+                placeholder="Optional: e.g., 'Area usually feels safer than this score.'",
+            )
+            if st.button("Submit feedback", key="submit_feedback_button"):
+                fb_payload = {
+                    **payload,
+                    "predicted_label": data["prediction"],
+                    "predicted_label_text": data["label"],
+                    "user_agrees": 0,
+                    "comment": comment or None,
+                }
+                fb_resp = requests.post(
+                    f"{API_BASE}/feedback",
+                    json=fb_payload,
+                    headers=API_HEADERS,
+                    timeout=5,
+                )
+                if fb_resp.status_code == 200:
+                    st.success("Feedback recorded, thank you!")
+                else:
+                    st.error("Failed to send feedback.")
+
+    st.markdown("### Nearby audits & POI context")
+
+    lat = latitude
+    lon = longitude
+    cols = st.columns(2)
+
+    with cols[0]:
+        st.subheader("Nearest public infrastructure")
+        try:
+            resp_poi = requests.get(
+                f"{API_BASE}/poi_context",
+                params={"lat": lat, "lon": lon},
+                headers=API_HEADERS,
+                timeout=5,
+            )
+            if resp_poi.status_code == 200:
+                poi_data = resp_poi.json()
+                st.write(f"- **Metro**: {poi_data.get('dist_to_metro_m', 0):.0f} m")
+                st.write(f"- **Bus stop**: {poi_data.get('dist_to_bus_m', 0):.0f} m")
+                st.write(
+                    f"- **Hospital**: {poi_data.get('dist_to_hospital_m', 0):.0f} m"
+                )
+                st.write(
+                    f"- **Police station**: {poi_data.get('dist_to_police_m', 0):.0f} m"
+                )
+            else:
+                st.info("POI context not available right now.")
+        except Exception as e:
+            st.info(f"Could not load POI context: {e}")
+
+    with cols[1]:
+        st.subheader("Recent audits within 300m")
+        try:
+            resp_audits = requests.get(
+                f"{API_BASE}/audit/nearby",
+                params={"lat": lat, "lon": lon, "radius_m": 300.0, "limit": 10},
+                headers=API_HEADERS,
+                timeout=5,
+            )
+            if resp_audits.status_code == 200:
+                audits = resp_audits.json()
+                if not audits:
+                    st.write("No audits logged around this point yet.")
+                else:
+                    for a in audits:
+                        label_map = {0: "Very unsafe", 1: "Okay", 2: "Feels safe"}
+                        _label_text = label_map.get(
+                            a.get("perceived_safety", 0), "Unknown"
+                        )
+                        dist_m = a.get("distance_m", 0.0)
+                        comment = a.get("comment") or ""
+                        st.markdown(
+                            f"- {_label_text} ({dist_m:.0f} m away)"
+                            + (f" — _{comment}_" if comment else "")
+                        )
+            else:
+                st.info("Could not load nearby audits.")
+        except Exception as e:
+            st.info(f"Could not load nearby audits: {e}")
 
 # ----------------------------
 # 5. Audit this place (real user rating)

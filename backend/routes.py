@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Header, status
 
+from backend.config import settings
 from backend.schemas import (
     PredictionInput,
     RouteFeatures,
@@ -24,13 +25,12 @@ AUDITS_STORE: List[Dict[str, Any]] = []
 _next_audit_id = 1
 
 # API Key auth
-API_KEY = "SAFEROUTE_SECRET_123"
 API_KEY_HEADER_NAME = "X-API-Key"
 
 
 def verify_api_key(x_api_key: str = Header(..., alias=API_KEY_HEADER_NAME)) -> bool:
     """Verify API key from request headers."""
-    if x_api_key != API_KEY:
+    if x_api_key != settings.api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
@@ -103,6 +103,12 @@ def predict_route_safety(
             raise HTTPException(status_code=503, detail="Model not initialized")
 
         data = payload.dict()
+        # Accept location from user or use defaults
+        data["latitude"] = data.get("latitude", 28.61)
+        data["longitude"] = data.get("longitude", 77.23)
+        data["dest_lat"] = data.get("dest_lat", 28.65)
+        data["dest_lon"] = data.get("dest_lon", 77.20)
+
         result = service.predict(data, audits=AUDITS_STORE)
         return result
 
