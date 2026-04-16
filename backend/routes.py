@@ -47,11 +47,9 @@ def verify_api_key(x_api_key: str | None = Header(None, alias=API_KEY_HEADER_NAM
 # --- Router setup ---
 router = APIRouter()
 
-
 # ============================================================================
 # Health & Status
 # ============================================================================
-
 
 @router.get("/")
 def root():
@@ -61,6 +59,7 @@ def root():
         "docs": "/docs",
         "health": "/health",
     }
+
 
 @router.get("/health")
 def health_check():
@@ -85,11 +84,9 @@ def health_check():
         print("❌ Model service failed:", e)
         raise HTTPException(status_code=500, detail="Model service not available")
 
-
 # ============================================================================
 # Predictions
 # ============================================================================
-
 
 @router.post("/predict", response_model=PredictionResponse)
 def predict_route_safety(
@@ -129,11 +126,9 @@ def predict_route_safety(
             status_code=500, detail=f"Prediction failed: {str(e)}"
         )
 
-
 # ============================================================================
 # Feedback
 # ============================================================================
-
 
 @router.post("/feedback")
 def submit_feedback(
@@ -174,11 +169,9 @@ def feedback_summary():
         "agree_ratio": agree_ratio,
     }
 
-
 # ============================================================================
 # Audits (Community Safety Data)
 # ============================================================================
-
 
 @router.post("/audit")
 def create_audit(
@@ -228,11 +221,9 @@ def audits_nearby(
     results.sort(key=lambda x: x["distance_m"])
     return results[:limit]
 
-
 # ============================================================================
 # POI & Area Data
 # ============================================================================
-
 
 @router.get("/poi_context")
 def get_poi_context(
@@ -247,7 +238,6 @@ def get_poi_context(
     service = get_model_service()
     if service.poi_context is None:
         raise HTTPException(status_code=503, detail="POI context not loaded")
-
     try:
         return service.poi_context.nearest_distances(lat=lat, lon=lon)
     except Exception as e:
@@ -266,7 +256,6 @@ def get_area_risk(
     service = get_model_service()
     if service.area_risk_table is None:
         raise HTTPException(status_code=503, detail="Area risk table not loaded")
-
     try:
         risk = service.area_risk_table.get_risk(area_key)
         return {

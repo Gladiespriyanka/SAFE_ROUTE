@@ -1,13 +1,12 @@
 category,name,lat,lon
-metro_station,Rajiv Chowk Metro Station,28.6328,77.2197
-metro_station,New Delhi Metro Station,28.6430,77.2200
-metro_station,Kashmere Gate Metro Station,28.6670,77.2274
-bus_stop,Connaught Place Bus Stop,28.6315,77.2167
-bus_stop,Ito Bus Stop,28.6270,77.2428
-bus_stop,AIIMS Bus Stop,28.5672,77.2100
-hospital,AIIMS Delhi Hospital,28.5672,77.2100
-hospital,Lok Nayak Hospital,28.6410,77.2380
-hospital,Safdarjung Hospital,28.5687,77.2103
-police_station,Parliament Street Police Station,28.6278,77.2167
-police_station,Mandir Marg Police Station,28.6390,77.2060
-police_station,Kashmere Gate Police Station,28.6650,77.2270
+metro_station,"New Delhi",28.6423,77.2199
+metro_station,"Kashmere Gate",28.6705,77.2243
+metro_station,"Rajiv Chowk",28.6328,77.2209
+bus_stop,"Kashmere Gate ISBT",28.6704,77.2251
+bus_stop,"Sarai Kale Khan",28.6103,77.3097
+hospital,"Lok Nayak Hospital",28.6372,77.2354
+hospital,"Ram Manohar Lohia Hospital",28.6154,77.1986
+hospital,"Safdarjung Hospital",28.5864,77.1989
+police_station,"Delhi Police HQ",28.6270,77.2130
+police_station,"IP Estate Police Station",28.6350,77.2400
+police_station,"Parliament Street PS",28.6261,77.2160

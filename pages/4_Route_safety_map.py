@@ -1,6 +1,4 @@
 
-Copy
-
 import os
 from typing import List, Tuple, Dict, Any
 from collections import Counter
@@ -18,7 +16,8 @@ st.set_page_config(page_title="Route safety map", page_icon="🗺️", layout="w
 st.markdown("<div id='top'></div>", unsafe_allow_html=True)
  
 # ---- Backend config ----
-API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000") + "/predict"
+BACKEND_URL = os.getenv("BACKEND_URL", "http://0.0.0.0:8000")
+
 API_HEADERS = {
     "X-API-Key": os.getenv("API_KEY", "supersecret123")
 }
@@ -74,8 +73,8 @@ def call_api_for_point(
 ) -> Dict[str, Any]:
     payload = base_payload.copy()
     payload["latitude"] = float(lat)
-    payload["longitude"] = float(lon)
-    resp = requests.post(API_URL, json=payload, headers=API_HEADERS, timeout=5)
+    payload["longitude"] = float(lon)    
+    resp = requests.post(f"{BACKEND_URL}/predict", json=payload, headers=API_HEADERS, timeout=5)
     resp.raise_for_status()
     return resp.json()
  

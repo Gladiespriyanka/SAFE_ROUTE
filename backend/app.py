@@ -17,6 +17,7 @@ async def lifespan(_: FastAPI):
     print("SafeRoute API is starting...")
     yield
 
+
 # Initialize FastAPI app
 app = FastAPI(
     title="SafeRoute Delhi API",
@@ -33,6 +34,5 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # Include all routes
 app.include_router(router)

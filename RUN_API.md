@@ -211,7 +211,7 @@ curl "http://localhost:8000/area_risk?area_key=central_delhi" \
 ```python
 import requests
 
-API_URL = "http://localhost:8000"
+API_URL = "http://0.0.0.0:8000"
 API_KEY = "SAFEROUTE_SECRET_123"
 
 headers = {"X-API-Key": API_KEY}

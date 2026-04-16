@@ -1,3 +1,5 @@
+import os
+
 import requests
 
 payload = {
@@ -18,11 +20,13 @@ payload = {
 }
 
 headers = {
-    "X-API-Key": "SAFEROUTE_SECRET_123"
+   "X-API-Key": os.getenv("API_KEY", "supersecret123")
 }
 
+BACKEND_URL = os.getenv("BACKEND_URL", "http://0.0.0.0:8000")
+
 r = requests.post(
-    "http://127.0.0.1:8000/predict",
+    f"{BACKEND_URL}/predict",
     json=payload,
     headers=headers
 )

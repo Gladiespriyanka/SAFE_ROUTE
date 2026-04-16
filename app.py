@@ -1,17 +1,16 @@
 import os
 import csv
 from datetime import datetime
-
 import requests
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-
+# FORCE the backend URL to 127.0.0.1:8000
+BACKEND_URL = "http://127.0.0.1:8000"
 API_URL = f"{BACKEND_URL}/predict"
-AUDIT_URL = "http://127.0.0.1:8000/audit"
-API_BASE = "http://127.0.0.1:8000"
+API_BASE = BACKEND_URL
+AUDIT_URL = f"{BACKEND_URL}/audit"
 
 API_KEY = os.getenv("API_KEY")
 if not API_KEY:
@@ -491,71 +490,71 @@ if data is not None and payload is not None:
         except Exception as e:
             st.info(f"Could not load nearby audits: {e}")
 
-# ----------------------------
-# 5. Audit this place (real user rating)
-# ----------------------------
-st.markdown("---")
-st.markdown("### 5. Audit this place (your own feeling)")
+    # ----------------------------
+    # 5. Audit this place (real user rating)
+    # ----------------------------
+    st.markdown("---")
+    st.markdown("### 5. Audit this place (your own feeling)")
 
-st.write(
-    "Log how this exact point feels to you now. "
-    "These audits will later be used to make the model more realistic."
-)
-
-col_a1, col_a2 = st.columns(2)
-with col_a1:
-    audit_lighting = st.selectbox(
-        "Lighting here now",
-        [0, 1, 2],
-        format_func=lambda v: ["Very poor", "OK", "Good"][v],
-        key="audit_lighting",
-    )
-    audit_crowd = st.selectbox(
-        "Crowd here now",
-        [0, 1, 2],
-        format_func=lambda v: ["Empty", "Some people", "Busy/Active"][v],
-        key="audit_crowd",
-    )
-with col_a2:
-    perceived_safety = st.selectbox(
-        "How safe does it feel overall?",
-        [0, 1, 2],
-        format_func=lambda v: ["Very unsafe", "Okay", "Feels safe"][v],
-        key="perceived_safety",
-    )
-    audit_area_type = st.selectbox(
-        "Area type (for audit, optional)",
-        [None, 0, 1, 2],
-        format_func=lambda v: (
-            "Not specified"
-            if v is None
-            else ["Residential", "Commercial/Market", "Office/IT park"][v]
-        ),
-        key="audit_area_type",
+    st.write(
+        "Log how this exact point feels to you now. "
+        "These audits will later be used to make the model more realistic."
     )
 
-audit_comment = st.text_input(
-    "Optional comment (e.g., 'dark corner near park, men loitering')",
-    key="audit_comment",
-)
+    col_a1, col_a2 = st.columns(2)
+    with col_a1:
+        audit_lighting = st.selectbox(
+            "Lighting here now",
+            [0, 1, 2],
+            format_func=lambda v: ["Very poor", "OK", "Good"][v],
+            key="audit_lighting",
+        )
+        audit_crowd = st.selectbox(
+            "Crowd here now",
+            [0, 1, 2],
+            format_func=lambda v: ["Empty", "Some people", "Busy/Active"][v],
+            key="audit_crowd",
+        )
+    with col_a2:
+        perceived_safety = st.selectbox(
+            "How safe does it feel overall?",
+            [0, 1, 2],
+            format_func=lambda v: ["Very unsafe", "Okay", "Feels safe"][v],
+            key="perceived_safety",
+        )
+        audit_area_type = st.selectbox(
+            "Area type (for audit, optional)",
+            [None, 0, 1, 2],
+            format_func=lambda v: (
+                "Not specified"
+                if v is None
+                else ["Residential", "Commercial/Market", "Office/IT park"][v]
+            ),
+            key="audit_area_type",
+        )
 
-if st.button("Submit audit for this place"):
-    audit_payload = {
-        "latitude": float(latitude),
-        "longitude": float(longitude),
-        "lighting_level": int(audit_lighting),
-        "crowd_level": int(audit_crowd),
-        "perceived_safety": int(perceived_safety),
-        "comment": audit_comment or None,
-        "hour_of_day": int(hour),
-        "is_weekend": int(weekend),
-        "area_type": None if audit_area_type is None else int(audit_area_type),
-    }
-    try:
-        resp = requests.post(AUDIT_URL, json=audit_payload, headers=API_HEADERS, timeout=5)
-        if resp.status_code == 200:
-            st.success("Audit saved. Thank you for contributing real data!")
-        else:
-            st.error(f"Failed to save audit: {resp.status_code} – {resp.text}")
-    except Exception as e:
-        st.error(f"Failed to call audit API: {e}")
+    audit_comment = st.text_input(
+        "Optional comment (e.g., 'dark corner near park, men loitering')",
+        key="audit_comment",
+    )
+
+    if st.button("Submit audit for this place"):
+        audit_payload = {
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "lighting_level": int(audit_lighting),
+            "crowd_level": int(audit_crowd),
+            "perceived_safety": int(perceived_safety),
+            "comment": audit_comment or None,
+            "hour_of_day": int(hour),
+            "is_weekend": int(weekend),
+            "area_type": None if audit_area_type is None else int(audit_area_type),
+        }
+        try:
+            resp = requests.post(AUDIT_URL, json=audit_payload, headers=API_HEADERS, timeout=5)
+            if resp.status_code == 200:
+                st.success("Audit saved. Thank you for contributing real data!")
+            else:
+                st.error(f"Failed to save audit: {resp.status_code} – {resp.text}")
+        except Exception as e:
+            st.error(f"Failed to call audit API: {e}")
