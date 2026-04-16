@@ -28,5 +28,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+print("✅ Loaded API KEY:", settings.api_key)  # 👈 ADD THIS
+
 if not settings.api_key:
     raise ValueError("API_KEY not set in environment variables")

@@ -11,9 +11,7 @@ docker ps , docker compose logs -f frontend
 feedback stored in RAM
 audits lost on restart
 ✅ Upgrade:
-
 Use:
-
 SQLite (simple)
 OR
 Firebase / MongoDB (better)

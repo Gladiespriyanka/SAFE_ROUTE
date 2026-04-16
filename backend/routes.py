@@ -28,12 +28,18 @@ _next_audit_id = 1
 API_KEY_HEADER_NAME = "X-API-Key"
 
 
-def verify_api_key(x_api_key: str = Header(..., alias=API_KEY_HEADER_NAME)) -> bool:
+def verify_api_key(x_api_key: str | None = Header(None, alias=API_KEY_HEADER_NAME)) -> bool:
     """Verify API key from request headers."""
+    if not x_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key",
+        )
+
     if x_api_key != settings.api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
+            detail="Invalid API key",
         )
     return True
 
@@ -56,24 +62,28 @@ def root():
         "health": "/health",
     }
 
-
 @router.get("/health")
 def health_check():
     """Health check endpoint with status information."""
-    service = get_model_service()
-    status_info = service.get_status()
+    try:
+        service = get_model_service()
+        status_info = service.get_status()
 
-    return {
-        "status": "ok",
-        "model_loaded": status_info["model_loaded"],
-        "num_features": status_info["num_features"],
-        "version": "1.3.0",
-        "num_audits": len(AUDITS_STORE),
-        "num_feedback": len(FEEDBACK_STORE),
-        "poi_loaded": status_info["poi_loaded"],
-        "area_risk_loaded": status_info["area_risk_loaded"],
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+        return {
+            "status": "ok",
+            "model_loaded": status_info["model_loaded"],
+            "num_features": status_info["num_features"],
+            "version": "1.3.0",
+            "num_audits": len(AUDITS_STORE),
+            "num_feedback": len(FEEDBACK_STORE),
+            "poi_loaded": status_info["poi_loaded"],
+            "area_risk_loaded": status_info["area_risk_loaded"],
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        print("❌ Model service failed:", e)
+        raise HTTPException(status_code=500, detail="Model service not available")
 
 
 # ============================================================================
