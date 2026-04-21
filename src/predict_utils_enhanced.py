@@ -327,12 +327,29 @@ def predict_safety(
             seen.add(f)
             deduped_model_factors.append(f)
 
+    positive_signals = 0
+    if clean_inputs["lighting_level"] == 2:
+        positive_signals += 1
+    if clean_inputs["crowd_level"] == 2:
+        positive_signals += 1
+    if clean_inputs["shops_open_at_night"] == 1:
+        positive_signals += 1
+    if clean_inputs["cctv_present"] == 1:
+        positive_signals += 1
+    if clean_inputs["police_station_within_1km"] == 1:
+        positive_signals += 1
+
+    risk_tier = risk_tier_from_score(risk_score)
+    if predicted_class == 0 and risk_score <= 80 and positive_signals >= 3:
+        predicted_class = 1
+        risk_tier = "Medium"
+
     return {
         "prediction": predicted_class,
         "label": LABELS[predicted_class],
         "description": LABEL_DESCRIPTIONS[predicted_class],
         "risk_score": risk_score,
-        "risk_tier": risk_tier_from_score(risk_score),
+        "risk_tier": risk_tier,
         "base_risk_score": int(round(base_risk)),
         "context_risk_delta": context_delta,
         "location": {

@@ -142,6 +142,44 @@ mode = st.radio(
 st.markdown("### Environmental & time context")
 st.caption("These inputs describe the conditions at the time of travel.")
 
+# ── Quick presets for common scenarios ───────────────────────────────────────
+preset_scenario = st.selectbox(
+    "Quick scenario (optional)",
+    [
+        "None",
+        "Office commute (evening, heading home)",
+        "Late-night return (after 10pm, alone)",
+        "Weekend outing (mall/market, moderate crowd)",
+    ],
+    help="Pick a scenario to prefill typical conditions. You can still adjust any field.",
+)
+
+if preset_scenario == "None":
+    st.session_state["_applied_preset_scenario"] = None
+elif st.session_state.get("_applied_preset_scenario") != preset_scenario:
+    if preset_scenario == "Office commute (evening, heading home)":
+        st.session_state["context_hour"] = 19
+        st.session_state["context_weekend"] = 0
+        st.session_state["context_lighting"] = 1
+        st.session_state["context_crowd"] = 1
+        st.session_state["context_trip_mode"] = "Cab / Auto"
+        st.session_state["context_group_travel"] = 0
+    elif preset_scenario == "Late-night return (after 10pm, alone)":
+        st.session_state["context_hour"] = 22
+        st.session_state["context_weekend"] = 0
+        st.session_state["context_lighting"] = 0
+        st.session_state["context_crowd"] = 0
+        st.session_state["context_trip_mode"] = "Cab / Auto"
+        st.session_state["context_group_travel"] = 0
+    elif preset_scenario == "Weekend outing (mall/market, moderate crowd)":
+        st.session_state["context_hour"] = 18
+        st.session_state["context_weekend"] = 1
+        st.session_state["context_lighting"] = 2
+        st.session_state["context_crowd"] = 2
+        st.session_state["context_trip_mode"] = "Walking"
+        st.session_state["context_group_travel"] = 1
+    st.session_state["_applied_preset_scenario"] = preset_scenario
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -149,11 +187,13 @@ with col1:
         "Lighting level",
         [0, 1, 2],
         format_func=lambda v: ["Very poor", "OK", "Good"][v],
+        key="context_lighting",
     )
     crowd = st.selectbox(
         "Crowd level",
         [0, 1, 2],
         format_func=lambda v: ["Empty", "Some people", "Busy/Active"][v],
+        key="context_crowd",
     )
     distance = st.slider("Distance to main road (m)", 0, 2000, 200, step=50)
 
@@ -175,35 +215,41 @@ with col2:
     )
 
 with col3:
-    hour = st.slider("Hour of day (0–23)", 0, 23, 20)
+    hour = st.slider("Hour of day (0–23)", 0, 23, 20, key="context_hour")
     weekend = st.selectbox(
         "Is it weekend?",
         [0, 1],
         format_func=lambda v: "Yes" if v else "No",
+        key="context_weekend",
     )
     area_type = st.selectbox(
         "Area type",
         [0, 1, 2],
         format_func=lambda v: ["Residential", "Commercial/Market", "Office/IT park"][v],
     )
-
 col4, col5 = st.columns(2)
 with col4:
+    trip_mode = st.selectbox(
+        "How are you travelling?",
+        ["Walking", "Cab / Auto", "Two-wheeler"],
+        key="context_trip_mode",
+    )
     near_metro_or_bus = st.selectbox(
         "Near metro or major bus stop?",
         [0, 1],
         format_func=lambda v: "Yes" if v else "No",
     )
+with col5:
     past_incidents_level = st.selectbox(
         "Past incidents level",
         [0, 1, 2],
         format_func=lambda v: ["Low", "Medium", "High"][v],
     )
-with col5:
     group_travel = st.selectbox(
         "Travelling alone or with others?",
         [0, 1],
         format_func=lambda v: "Alone" if v == 0 else "With others",
+        key="context_group_travel",
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -284,6 +330,7 @@ if mode == "📍 Score a single location":
             "near_metro_or_bus": int(near_metro_or_bus),
             "past_incidents_level": int(past_incidents_level),
             "group_travel": int(group_travel),
+            "trip_mode": trip_mode,  # new field
         }
         try:
             resp = requests.post(API_URL, json=payload, headers=API_HEADERS, timeout=5)
@@ -312,26 +359,42 @@ if mode == "📍 Score a single location":
         probs = data["probabilities"]
         confidence_score = data.get("confidence")
         confidence_level = data.get("confidence_level")
+        # Treat low-ish confidence as borderline
+        borderline = confidence_score is not None and 0.5 <= confidence_score <= 0.7
         shap_factors = data.get("shap_explanation", {}).get("top_factors", [])
 
         # Build a short natural-language verdict summary
         tier = data.get("risk_tier", "")
         factors = data.get("factors", [])
         short_reason = ""
-        if factors:
+        if factors and not (
+            len(factors) == 1 and "no major model risk factors" in factors[0].lower()
+        ):
             short_reason = "Main reasons: " + ", ".join(factors[:2]) + "."
+        elif label_text == "Unsafe":
+            short_reason = (
+                "The model has seen similar locations behave riskily in training data, "
+                "even though no single factor stands out here."
+            )
 
+        verdict_prefix = "borderline " if borderline else ""
         st.write(
-            f"This spot is considered **{label_text.lower()}** "
+            f"This spot is considered **{verdict_prefix}{label_text.lower()}** "
             f"{'('+tier.lower()+') ' if tier else ''}"
-            f"for women under the conditions you entered. {short_reason}"
+            f"for women when **{trip_mode.lower()}**, under the conditions you entered. {short_reason}"
         )
 
         # Simple safety hint based on label
         if label_text == "Unsafe":
-            st.warning(
-                "Try choosing a busier, better-lit path or travelling with company if possible."
-            )
+            if borderline:
+                st.warning(
+                    "Model leans unsafe but with medium confidence. "
+                    "Given your conditions look positive, treat this as a caution, not a guarantee."
+                )
+            else:
+                st.warning(
+                    "Try choosing a busier, better-lit path or travelling with company if possible."
+                )
         elif label_text == "Moderate":
             st.info(
                 "Conditions are mixed. Prefer main roads, stay aware of surroundings, and avoid very quiet stretches."
@@ -407,9 +470,15 @@ if mode == "📍 Score a single location":
         with f_col2:
             st.markdown("#### AI Explanation")
             if factors:
-                explanation = f"This location is considered **{label_text.lower()}** due to: "
-                explanation += ", ".join(factors) + "."
-                st.info(explanation)
+                if len(factors) == 1 and "no major model risk factors" in factors[0].lower():
+                    st.info(
+                        "This area is flagged mainly because similar points were high-risk in the training data. "
+                        "No single factor here crosses a strong risk threshold, so treat this as a caution flag."
+                    )
+                else:
+                    explanation = f"This location is considered **{label_text.lower()}** due to: "
+                    explanation += ", ".join(factors) + "."
+                    st.info(explanation)
             else:
                 st.info("Standard conditions detected for this area.")
 
@@ -470,6 +539,7 @@ if mode == "📍 Score a single location":
 
         with audit_col:
             st.subheader("Recent audits within 300 m")
+            audits = []
             try:
                 resp_audits = requests.get(
                     f"{API_BASE}/audit/nearby",
@@ -500,6 +570,34 @@ if mode == "📍 Score a single location":
                     st.info("Could not load nearby audits.")
             except Exception as e:
                 st.info(f"Could not load nearby audits: {e}")
+
+        # Simple safety trust score combining model confidence + user audits
+        st.markdown("### ✅ Safety trust score (experimental)")
+        model_conf = data.get("confidence", 0.5)
+        # Base trust from model confidence (scaled 0-100)
+        model_trust = model_conf * 100
+
+        audit_trust = 50.0
+        if audits:
+            # Map perceived_safety 0/1/2 to 0/50/100 and average
+            vals = []
+            for a in audits:
+                ps = a.get("perceived_safety", 1)
+                if ps == 0:
+                    vals.append(0.0)
+                elif ps == 1:
+                    vals.append(50.0)
+                else:
+                    vals.append(100.0)
+            audit_trust = sum(vals) / len(vals)
+
+        # Weighted blend: 60% model, 40% audits
+        combined_trust = 0.6 * model_trust + 0.4 * audit_trust
+        st.metric("Safety trust score", f"{combined_trust:.0f} / 100")
+        st.caption(
+            "This combines how confident the model is with how nearby people rated this area. "
+            "Higher is better, but it is still an approximation."
+        )
 
         # Feedback
         st.markdown("---")
@@ -619,6 +717,30 @@ if mode == "📍 Score a single location":
             except Exception as e:
                 st.error(f"Failed to call audit API: {e}")
 
+        st.markdown("---")
+        st.markdown("### 🚨 Quick incident log (beta)")
+        st.caption(
+            "If something specific happened here (harassment, stalking, unsafe crowd), "
+            "log it briefly so it can be reviewed later."
+        )
+
+        incident_type = st.selectbox(
+            "Type of incident",
+            ["None", "Harassment", "Stalking / Following", "Group of men loitering", "Other"],
+            key="incident_type",
+        )
+        incident_comment = st.text_area(
+            "Short description (no personal details)",
+            key="incident_comment",
+            placeholder="e.g., 'Group of drunk men outside closed shops around 10:30pm.'",
+        )
+
+        if st.button("Save incident (local only)", key="save_incident_local"):
+            # For now, just acknowledge; later you can wire a dedicated backend route.
+            st.success(
+                "Incident noted locally. In a full app, this would be reviewed and added to the safety map."
+            )
+
 
 # =============================================================================
 # MODE B – Route safety (multi-point)
@@ -664,6 +786,7 @@ elif mode == "🗺️ Find the safest route between two points":
             "near_metro_or_bus": int(near_metro_or_bus),
             "past_incidents_level": int(past_incidents_level),
             "group_travel": int(group_travel),
+            "trip_mode": trip_mode,  # new field
         }
         with st.spinner("Fetching candidate routes and scoring them…"):
             try:
@@ -717,6 +840,28 @@ elif mode == "🗺️ Find the safest route between two points":
                         "% unsafe pts": f"{r['unsafe_fraction'] * 100:.0f}%",
                         "Length": f"{length_km:.2f} km" if length_km else "—",
                     }
+                )
+            # Quick safety vs distance summary
+            safest_route = routes[0]  # already sorted safest-first
+            shortest_route = min(
+                routes, key=lambda r: (r.get("approx_length") or 1e9)
+            )
+
+            safest_len_km = (safest_route.get("approx_length") or 0) / 1000
+            shortest_len_km = (shortest_route.get("approx_length") or 0) / 1000
+
+            st.markdown("#### Summary: safety vs distance")
+
+            if safest_route is shortest_route:
+                st.success(
+                    f"The safest route is also the shortest (~{safest_len_km:.2f} km). "
+                    "Good news!"
+                )
+            else:
+                extra_km = max(0.0, safest_len_km - shortest_len_km)
+                st.info(
+                    f"Safest route (~{safest_len_km:.2f} km) vs shortest route (~{shortest_len_km:.2f} km): "
+                    f"you trade about {extra_km:.2f} km for better safety."
                 )
             st.dataframe(summary_rows, use_container_width=True, hide_index=True)
 
@@ -772,4 +917,32 @@ elif mode == "🗺️ Find the safest route between two points":
                     d_col3.metric(
                         "Unsafe segment share",
                         f"{route['unsafe_fraction'] * 100:.0f}%",
+                    )
+
+                    # Simple comfort profile based on risk + current context
+                    comfort_parts = []
+                    if lighting == 2:
+                        comfort_parts.append("well-lit")
+                    elif lighting == 0:
+                        comfort_parts.append("poorly lit")
+
+                    if crowd == 2:
+                        comfort_parts.append("busy")
+                    elif crowd == 0:
+                        comfort_parts.append("very quiet")
+
+                    if hour >= 22 or hour <= 5:
+                        comfort_parts.append("late at night")
+
+                    if trip_mode == "Walking":
+                        mode_phrase = "for walking"
+                    elif trip_mode == "Cab / Auto":
+                        mode_phrase = "for cab/auto travel"
+                    else:
+                        mode_phrase = "for two-wheelers"
+
+                    profile_text = ", ".join(comfort_parts) if comfort_parts else "typical conditions"
+                    st.write(
+                        f"Comfort profile: **{profile_text}** {mode_phrase}. "
+                        f"Overall label: **{route['safety_label']}**."
                     )
