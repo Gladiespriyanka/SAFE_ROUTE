@@ -128,6 +128,16 @@ def compute_confidence_level(max_probability: float) -> str:
         return "Very Low"
 
 
+def risk_tier_from_score(score: int) -> str:
+    """Map 0-100 risk score to simple tiers."""
+    if score >= 70:
+        return "High"
+    elif score >= 40:
+        return "Medium"
+    else:
+        return "Low"
+
+
 def get_shap_explanation(
     pipeline,
     feature_cols,
@@ -247,14 +257,19 @@ def predict_safety(
         predicted_class = 0
         probabilities = np.array([0.9, 0.07, 0.03])
 
-    # Base risk from unsafe probability
-    risk_score = int(
-    (probabilities[0] * 100) +   # unsafe weight
-    (probabilities[1] * 50)      # moderate weight
-)
+    confidence = float(np.max(probabilities))
+    confidence_level = compute_confidence_level(confidence)
 
-    # SHAP factors
-    factors = []
+    # ---- 1) Model-only base risk on 0-100 scale ----
+    unsafe_p = float(probabilities[0])
+    moderate_p = float(probabilities[1])
+    safe_p = float(probabilities[2])
+
+    base_risk = unsafe_p * 100.0 + moderate_p * 50.0 + safe_p * 0.0
+    risk_score = int(round(base_risk))
+
+    # ---- 2) SHAP / model-based factors ----
+    model_factors: list[str] = []
     if include_shap:
         shap_explain = get_shap_explanation(
             pipeline, feature_cols, clean_inputs, predicted_class
@@ -263,67 +278,76 @@ def predict_safety(
         shap_explain = {"status": "skipped", "top_factors": []}
 
     if shap_explain["status"] == "success":
-        factors.extend([
-            FEATURE_NAME_MAP.get(f["feature"], f["feature"])
-            for f in shap_explain["top_factors"]
-        ])
+        model_factors.extend(
+            [
+                FEATURE_NAME_MAP.get(f["feature"], f["feature"])
+                for f in shap_explain["top_factors"]
+            ]
+        )
 
-    # REAL-TIME RISK BOOST
+    # ---- 3) Context-based risk adjustments (traffic, weather, time) ----
+    context_delta = 0
+    context_explanations: list[str] = []
 
     # TRAFFIC RISK LOGIC
-    if traffic.get("congestion", 0.0) < 0.05 and clean_inputs["crowd_level"] == 0:
-        risk_score += 10
-        factors.append("low traffic (isolated road)")
-
-    elif traffic.get("congestion", 0.0) > 0.2:
-        risk_score -= 5
-        factors.append("high traffic (safer due to crowd)")
+    congestion = float(traffic.get("congestion", 0.0))
+    if congestion < 0.05 and clean_inputs["crowd_level"] == 0:
+        context_delta += 10
+        context_explanations.append("low traffic (isolated road) ➜ +10 risk")
+    elif congestion > 0.2:
+        context_delta -= 5
+        context_explanations.append("high traffic (busy road) ➜ −5 risk")
 
     # WEATHER RISK LOGIC
     if weather.get("rain", 0) == 1 and clean_inputs["lighting_level"] == 0:
-        risk_score += 10
-        factors.append("rain + poor visibility")
+        context_delta += 10
+        context_explanations.append("rain + poor lighting ➜ +10 risk")
 
     if weather.get("fog", 0) == 1:
-        risk_score += 8
-        factors.append("foggy conditions")
+        context_delta += 8
+        context_explanations.append("foggy conditions ➜ +8 risk")
 
     # TIME-OF-DAY RISK LOGIC
     hour = hour_of_day
     if (hour >= 22 or hour <= 4) and clean_inputs["crowd_level"] == 0:
-        risk_score += 12
-        factors.append("late night + isolated area")
+        context_delta += 12
+        context_explanations.append("late night + empty area ➜ +12 risk")
 
-    # Clamp risk score
-    risk_score = min(risk_score, 100)
+    # ---- 4) Final risk score and tier ----
+    risk_score = max(0, min(100, risk_score + context_delta))
 
-    if not factors:
-        factors = ["no major risk factors"]
+    if not model_factors:
+        model_factors = ["no major model risk factors"]
 
     # 🔹 CLEAN FACTORS: remove duplicates, preserve order
     seen = set()
-    deduped_factors = []
-    for f in factors:
+    deduped_model_factors: list[str] = []
+    for f in model_factors:
         if f not in seen:
             seen.add(f)
-            deduped_factors.append(f)
+            deduped_model_factors.append(f)
 
     return {
         "prediction": predicted_class,
         "label": LABELS[predicted_class],
         "description": LABEL_DESCRIPTIONS[predicted_class],
         "risk_score": risk_score,
+        "risk_tier": risk_tier_from_score(risk_score),
+        "base_risk_score": int(round(base_risk)),
+        "context_risk_delta": context_delta,
         "location": {
             "lat": latitude,
-            "lon": longitude
+            "lon": longitude,
         },
-        "factors": deduped_factors,
+        "model_factors": deduped_model_factors,
+        "context_explanations": context_explanations,
+        "factors": deduped_model_factors + context_explanations,
         "confidence": confidence,
         "confidence_level": confidence_level,
         "probabilities": {
-            "unsafe": float(probabilities[0]),
-            "moderate": float(probabilities[1]),
-            "safe": float(probabilities[2]),
+            "unsafe": unsafe_p,
+            "moderate": moderate_p,
+            "safe": safe_p,
         },
         "weather": weather,
         "traffic": traffic,

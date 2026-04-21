@@ -91,11 +91,21 @@ class HealthResponse(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    """Enhanced prediction response with confidence and SHAP explanations."""
+    """Enhanced prediction response with ALL fields."""
     prediction: int
     label: str
     description: str
+    risk_score: int
+    risk_tier: str
+    base_risk_score: int
+    context_risk_delta: int
+    location: dict
+    model_factors: list[str]
+    context_explanations: list[str]
+    factors: list[str]
     confidence: float
     confidence_level: str
     probabilities: dict
+    weather: dict
+    traffic: dict
     shap_explanation: dict

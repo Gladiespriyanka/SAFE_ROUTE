@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     python3-dev \
-    libatlas-base-dev \
+    libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

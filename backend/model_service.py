@@ -32,7 +32,6 @@ class ModelService:
         self.poi_context: Optional[POIContext] = None
         self.area_risk_table: Optional[AreaRiskTable] = None
         self._load_all()
-
     def _load_all(self):
         """Load model and auxiliary data tables."""
         try:
@@ -200,15 +199,7 @@ class ModelService:
             include_shap=True,
         )
 
-        return {
-            "prediction": result["prediction"],
-            "label": result["label"],
-            "description": result.get("description", ""),
-            "confidence": result["confidence"],
-            "confidence_level": result["confidence_level"],
-            "probabilities": result["probabilities"],
-            "shap_explanation": result.get("shap_explanation", {}),
-        }
+        return result
 
 
 # Global service instance

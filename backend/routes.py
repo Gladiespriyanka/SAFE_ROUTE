@@ -18,6 +18,7 @@ from backend.schemas import (
     PredictionResponse,
 )
 from backend.model_service import get_model_service
+from backend.services.routing import get_candidate_routes
 
 # In-memory data stores (can be replaced with DB later)
 FEEDBACK_STORE: List[Dict[str, Any]] = []
@@ -124,6 +125,115 @@ def predict_route_safety(
         traceback.print_exc()
         raise HTTPException(
             status_code=500, detail=f"Prediction failed: {str(e)}"
+        )
+
+
+@router.post("/routes/safe_options")
+def safe_routes(
+    start_lat: float,
+    start_lon: float,
+    end_lat: float,
+    end_lon: float,
+    lighting_level: int,
+    crowd_level: int,
+    distance_to_main_road_m: float,
+    shops_open_at_night: int,
+    police_station_within_1km: int,
+    cctv_present: int,
+    hour_of_day: int,
+    is_weekend: int,
+    area_type: int,
+    near_metro_or_bus: int,
+    past_incidents_level: int,
+    group_travel: int,
+    ok: bool = Depends(verify_api_key),
+):
+    """Return candidate routes colored by sampled safety risk."""
+    try:
+        service = get_model_service()
+        if not service.is_ready():
+            raise HTTPException(status_code=503, detail="Model not initialized")
+
+        routes = get_candidate_routes(start_lat, start_lon, end_lat, end_lon, k=5)
+
+        results = []
+        for route in routes:
+            coords = route["coordinates"]
+            step = max(1, len(coords) // 10)
+            sampled = coords[::step] if len(coords) > 1 else coords
+
+            per_point_scores = []
+            per_point_labels = []
+
+            for lat, lon in sampled:
+                data = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "lighting_level": lighting_level,
+                    "crowd_level": crowd_level,
+                    "distance_to_main_road_m": distance_to_main_road_m,
+                    "shops_open_at_night": shops_open_at_night,
+                    "police_station_within_1km": police_station_within_1km,
+                    "cctv_present": cctv_present,
+                    "hour_of_day": hour_of_day,
+                    "is_weekend": is_weekend,
+                    "area_type": area_type,
+                    "near_metro_or_bus": near_metro_or_bus,
+                    "past_incidents_level": past_incidents_level,
+                    "group_travel": group_travel,
+                }
+                pred = service.predict(data, audits=AUDITS_STORE)
+                per_point_scores.append(pred["risk_score"])
+                per_point_labels.append(pred["prediction"])
+
+            if not per_point_scores:
+                continue
+
+            avg_risk = sum(per_point_scores) / len(per_point_scores)
+            max_risk = max(per_point_scores)
+            unsafe_fraction = (
+                sum(1 for label in per_point_labels if label == 0)
+                / len(per_point_labels)
+            )
+
+            if max_risk >= 80 or unsafe_fraction >= 0.3:
+                safety_label = "Mostly unsafe"
+                color = "red"
+            elif avg_risk >= 40:
+                safety_label = "Mixed / moderate"
+                color = "orange"
+            else:
+                safety_label = "Relatively safer"
+                color = "green"
+
+            results.append(
+                {
+                    "coordinates": coords,
+                    "avg_risk": avg_risk,
+                    "max_risk": max_risk,
+                    "unsafe_fraction": unsafe_fraction,
+                    "safety_label": safety_label,
+                    "color": color,
+                    "approx_length": route.get("approx_length"),
+                }
+            )
+
+        results.sort(key=lambda r: r["avg_risk"])
+        return {"routes": results}
+
+    except HTTPException:
+        raise
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Route dependencies are not installed: {str(e)}",
+        )
+    except Exception as e:
+        print(f"[ERROR] Route safety failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Route safety failed: {str(e)}",
         )
 
 # ============================================================================

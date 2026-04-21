@@ -229,6 +229,78 @@ if "prediction_result" not in st.session_state:
     st.session_state.prediction_result = None
 if "prediction_payload" not in st.session_state:
     st.session_state.prediction_payload = None
+if "route_options" not in st.session_state:
+    st.session_state.route_options = None
+
+
+st.markdown("## Route-level safety (beta)")
+
+col_s1, col_s2 = st.columns(2)
+with col_s1:
+    start_lat = st.number_input("Start latitude", value=28.6139, format="%.6f")
+    start_lon = st.number_input("Start longitude", value=77.2090, format="%.6f")
+with col_s2:
+    end_lat = st.number_input("Destination latitude", value=28.6350, format="%.6f")
+    end_lon = st.number_input("Destination longitude", value=77.2200, format="%.6f")
+
+if st.button("Find safest routes"):
+    route_payload = {
+        "start_lat": float(start_lat),
+        "start_lon": float(start_lon),
+        "end_lat": float(end_lat),
+        "end_lon": float(end_lon),
+        "lighting_level": int(lighting),
+        "crowd_level": int(crowd),
+        "distance_to_main_road_m": float(distance),
+        "shops_open_at_night": int(shops),
+        "police_station_within_1km": int(police),
+        "cctv_present": int(cctv),
+        "hour_of_day": int(hour),
+        "is_weekend": int(weekend),
+        "area_type": int(area_type),
+        "near_metro_or_bus": int(near_metro_or_bus),
+        "past_incidents_level": int(past_incidents_level),
+        "group_travel": int(group_travel),
+    }
+    try:
+        resp = requests.post(
+            f"{API_BASE}/routes/safe_options",
+            params=route_payload,
+            headers=API_HEADERS,
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            st.error(f"Route API error: {resp.status_code} - {resp.text}")
+            st.session_state.route_options = None
+        else:
+            st.session_state.route_options = resp.json()
+    except Exception as e:
+        st.error(f"Failed to fetch routes: {e}")
+        st.session_state.route_options = None
+
+data_routes = st.session_state.route_options
+if data_routes and "routes" in data_routes:
+    routes = data_routes["routes"]
+    st.write(f"Found {len(routes)} candidate routes")
+
+    route_map = folium.Map(location=[start_lat, start_lon], zoom_start=13)
+    folium.Marker([start_lat, start_lon], popup="Start").add_to(route_map)
+    folium.Marker([end_lat, end_lon], popup="Destination").add_to(route_map)
+
+    for idx, route in enumerate(routes, start=1):
+        coords = route["coordinates"]
+        folium.PolyLine(
+            locations=coords,
+            color=route.get("color", "blue"),
+            weight=5,
+            opacity=0.8,
+            tooltip=(
+                f"Route {idx}: {route['safety_label']} "
+                f"(avg risk {route['avg_risk']:.1f}, max {route['max_risk']:.1f})"
+            ),
+        ).add_to(route_map)
+
+    st_folium(route_map, width=1000, height=450)
 
 
 def run_prediction():
@@ -287,7 +359,10 @@ if data is not None and payload is not None:
     # 1. Summary Cards
     m_col1, m_col2, m_col3 = st.columns(3)
     with m_col1:
-        st.metric("Risk Score", data.get("risk_score", 0))
+        st.metric(
+            "Risk Score",
+            f"{data.get('risk_score', 0)} ({data.get('risk_tier', '')})",
+        )
     with m_col2:
         st.metric("Confidence", f"{data.get('confidence', 0):.2f}")
     with m_col3:

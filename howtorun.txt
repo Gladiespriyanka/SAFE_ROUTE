@@ -1,8 +1,12 @@
 1 terminal run 
-docker compose up --build
-2 terminal run 
-docker ps , docker compose logs -f frontend
+$env:API_KEY="supersecret123"
+ $env:BACKEND_URL="http://127.0.0.1:8000"
+ streamlit run app.py
 
+2 terminal run 
+$env:API_KEY="supersecret123"
+ $env:BACKEND_URL="http://127.0.0.1:8000" 
+uvicorn backend.app:app --host 127.0.0.1 --port 8000
 
 
 
